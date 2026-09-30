@@ -20,6 +20,7 @@ from ecg_eval.analysis import FrameAnalyzer, ResultCache, run_analysis
 from ecg_eval.annotation import storage as annotation_storage
 from ecg_eval.config import available_configs, load_config
 from ecg_eval.ingestion import dataset_summary, ingest
+from ecg_eval.visualization import sqi_label
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,31 +85,70 @@ STAGE_LABELS = {
 }
 
 
-def _stage_toggles(config: dict, master_on: bool) -> dict:
-    """Render one toggle per preprocessing stage and return the effective chain.
-
-    The returned dict keeps the master switch AND every stage flag, so it is
-    passed straight to ``preprocess``. When the master switch is off each stage
-    is forced off, so the UI can never display a filter as active while the
-    analysis silently runs on the raw signal.
-    """
+def _stage_order() -> tuple[str, ...]:
+    """Canonical stage order, so execution is reproducible."""
     from ecg_eval.preprocessing import STAGE_ORDER
 
-    effective: dict = {"applied": bool(master_on)}
-    for stage in STAGE_ORDER:
+    return STAGE_ORDER
+
+
+def defaults_chain(config: dict) -> dict:
+    """The chain as configured in YAML, with the master switch attached."""
+    chain = dict(config)
+    chain["applied"] = bool(config.get("applied", False))
+    return chain
+
+
+def _stage_panel(config: dict) -> dict:
+    """Render the filter toggles and edit the PENDING selection.
+
+    Returns the pending chain. Nothing here changes what the analysis uses;
+    only the Activate button commits it (see :func:`activate_chain`).
+    """
+    pending = st.session_state.get("pp_pending") or defaults_chain(config)
+
+    for stage in _stage_order():
         spec = config.get(stage)
         spec = spec if isinstance(spec, dict) else {}
-        default = bool(spec.get("enabled", False))
+        current = bool(pending.get(stage, {}).get("enabled", False))
         enabled = st.checkbox(
             STAGE_LABELS.get(stage, stage),
-            value=default and master_on,
+            value=current,
             key=f"pp_stage_{stage}",
-            disabled=not master_on,
         )
-        effective[stage] = {**spec, "enabled": enabled}
+        pending[stage] = {**spec, "enabled": enabled}
 
-    return effective
+    pending["applied"] = True
+    st.session_state.pp_pending = pending
+    return pending
 
+
+def active_chain() -> dict:
+    """The chain the analysis actually runs, i.e. the ACTIVATED one."""
+    return st.session_state.get("pp_active") or {}
+
+
+def activate_chain(pending: dict) -> dict:
+    """Commit the pending selection and drop results computed without it."""
+    chain = dict(pending)
+    chain["applied"] = True
+    st.session_state.pp_active = chain
+    # Results computed on the previous chain are no longer valid.
+    st.session_state.analysis = None
+    return chain
+
+
+def reset_chain(config: dict) -> dict:
+    """Restore the configured defaults into both pending and active."""
+    chain = defaults_chain(config)
+    st.session_state.pp_pending = dict(chain)
+    st.session_state.pp_active = dict(chain)
+    for stage in _stage_order():
+        spec = config.get(stage)
+        spec = spec if isinstance(spec, dict) else {}
+        st.session_state[f"pp_stage_{stage}"] = bool(spec.get("enabled", False))
+    st.session_state.analysis = None
+    return chain
 
 def sidebar() -> dict[str, Any]:
     """Sidebar: dataset, subject, session and analysis configuration."""
@@ -141,7 +181,13 @@ def sidebar() -> dict[str, Any]:
 
         annotations_file = annotations_dir / annotation_storage.ANNOTATIONS_FILE
         mtime = annotations_file.stat().st_mtime if annotations_file.exists() else 0.0
-        st.session_state.annotations = get_annotations(str(annotations_dir), mtime)
+        # Reload from disk ONLY when the file actually changed. Reloading on
+        # every rerun silently discarded unsaved assignments the moment the user
+        # navigated to another tab, because Streamlit reruns this script on
+        # every interaction.
+        if st.session_state.get("annotations_source_mtime") != mtime:
+            st.session_state.annotations = get_annotations(str(annotations_dir), mtime)
+            st.session_state.annotations_source_mtime = mtime
 
         summary = dataset_summary(dataset)
         st.metric("Subjects", summary["subjects"].__len__())
@@ -160,7 +206,7 @@ def sidebar() -> dict[str, Any]:
         st.divider()
         st.markdown("#### Method")
         method = "Zhao-Zhang reproduction" if config.get("rpeak.primary_detector_b") != "pan_tompkins" else "Pan-Tompkins adaptation"
-        st.caption(f"qSQI: {method}")
+        st.caption(f"{sqi_label('qSQI')}: {method}")
         st.caption(
             f"Detectors: `{config.get('rpeak.primary_detector_a')}` vs "
             f"`{config.get('rpeak.primary_detector_b')}`"
@@ -178,41 +224,70 @@ def sidebar() -> dict[str, Any]:
         st.divider()
         st.markdown("#### Preprocessing")
         st.caption(
-            "Each filter can be switched on or off individually. Stage order and the "
-            "DSP implementations match the ECG dashboard "
+            "Tick the filters you want, then press Activate filters. The analysis runs "
+            "on the ACTIVATED selection and re-runs with it once activated. Stage "
+            "order and the DSP implementations match the ECG dashboard "
             "(`templates/preprocessing.py`)."
         )
         configured = config.section("preprocessing")
-        configured_on = bool(configured.get("applied", False))
 
-        # NOTE: no `key=` here. Assigning the return value to a session_state
-        # entry that is ALSO the widget key raises
-        # StreamlitWidgetAlreadyInstantiatedError, so the widget owns its own
-        # key and the result is stored under a separate name.
-        master_switch = st.checkbox(
-            "Execute preprocessing",
-            value=configured_on,
-            help=(
-                "Master switch. When off, the analysis measures the raw calibrated ",
-                "signal as acquired and no filter below is applied.",
-            ),
-        )
-        st.session_state.preprocessing_enabled = master_switch
+        # First visit: start from the configured defaults.
+        if "pp_active" not in st.session_state:
+            defaults = defaults_chain(configured)
+            st.session_state.pp_pending = dict(defaults)
+            st.session_state.pp_active = dict(defaults)
+            for stage_name in _stage_order():
+                stage_spec = configured.get(stage_name)
+                stage_spec = stage_spec if isinstance(stage_spec, dict) else {}
+                st.session_state[f"pp_stage_{stage_name}"] = bool(
+                    stage_spec.get("enabled", False)
+                )
 
-        st.session_state.preprocessing_stages = _stage_toggles(
-            configured, master_switch
-        )
+        pending = _stage_panel(configured)
 
-    # Toggling preprocessing changes every SQI value, so a previous run is no
-    # longer valid. Drop it here, before the page renders. Any stage change
-    # counts, not just the master switch.
-    stage_state = st.session_state.get("preprocessing_stages", {})
-    current_switch = (st.session_state.preprocessing_enabled, json.dumps(stage_state, sort_keys=True, default=str))
-    previous_switch = st.session_state.get("preprocessing_run_switch")
-    if st.session_state.analysis is not None and previous_switch is not None:
-        if previous_switch != current_switch:
+        pending_on = [s for s in _stage_order() if pending.get(s, {}).get("enabled")]
+        active = active_chain()
+        active_on = [s for s in _stage_order() if active.get(s, {}).get("enabled")]
+        dirty = pending_on != active_on
+
+        if active_on:
+            st.caption("Active filters: " + ", ".join(active_on))
+        else:
+            st.caption("No filter active. The analysis measures the raw signal.")
+        if dirty:
+            st.warning(
+                "Selection changed but not activated. Press **Activate filters** so "
+                "the analysis uses it."
+            )
+
+        b1, b2 = st.columns([2, 1])
+        if b1.button(
+            "Activate filters",
+            type="primary",
+            disabled=not dirty,
+            help="Apply the ticked filters to the analysis.",
+            key="pp_activate",
+        ):
+            activate_chain(pending)
+            st.rerun()
+        if b2.button("Reset", key="pp_reset", help="Restore the configured defaults."):
+            reset_chain(configured)
+            st.rerun()
+
+    # The analysis consumes the ACTIVATED chain only. Un-ticking a box changes
+    # the pending selection and nothing else, so a run can never silently use a
+    # filter the user has not activated.
+    chain = active_chain()
+    chain_on = bool(chain) and any(chain.get(s, {}).get("enabled") for s in _stage_order())
+    st.session_state.preprocessing_enabled = chain_on
+
+    # A change of the activated chain invalidates any previous run, so drop it
+    # here before the page renders.
+    fingerprint = json.dumps(chain, sort_keys=True, default=str)
+    if st.session_state.analysis is not None:
+        if st.session_state.get("preprocessing_run_switch") != fingerprint:
             st.session_state.analysis = None
-    st.session_state.preprocessing_run_switch = current_switch
+    st.session_state.preprocessing_run_switch = fingerprint
 
     return {
         "config": config,
@@ -224,10 +299,11 @@ def sidebar() -> dict[str, Any]:
         "processed_dir": processed_dir,
         "cache": cache,
         "summary": summary,
-        "preprocessing_enabled": st.session_state.preprocessing_enabled,
-        # effective per-stage chain, including each toggle. Passed to the
-        # analyzer so the SQI computation uses exactly the filters shown here.
-        "preprocessing_stages": st.session_state.get("preprocessing_stages", {}),
+        "preprocessing_enabled": chain_on,
+        # activated per-stage chain, passed to the analyzer so the SQI
+        # computation uses exactly the filters shown as active.
+        "preprocessing_stages": chain or None,
+        "preprocessing_active": [s for s in _stage_order() if chain.get(s, {}).get("enabled")],
     }
 
 
@@ -264,14 +340,15 @@ def run_or_get_analysis(
         progress_bar.progress(min(1.0, done / max(1, total)), text=f"Analysed {done} / {total} frames")
         status.caption(
             f"Latest: {result.subject_id} · {result.position} · frame {result.frame_id} → "
-            f"qSQI {result.q_sqi:.3f}, pSQI {result.p_sqi:.3f}, kSQI {result.k_sqi:.3f}, "
-            f"basSQI {result.bas_sqi:.3f} → {result.quality_class}"
+            f"{sqi_label('qSQI')} {result.q_sqi:.3f}, {sqi_label('pSQI')} {result.p_sqi:.3f}, "
+            f"{sqi_label('kSQI')} {result.k_sqi:.3f}, {sqi_label('basSQI')} {result.bas_sqi:.3f} "
+            f"→ {result.quality_class}"
         )
 
     analysis = run_analysis(
         dataset, annotations, config, cache=cache, progress=on_progress,
         preprocessing_enabled=st.session_state.preprocessing_enabled,
-        preprocessing_stages=st.session_state.get("preprocessing_stages") or None,
+        preprocessing_stages=st.session_state.get("pp_active") or None,
     )
     cache.flush()
     progress_bar.empty()

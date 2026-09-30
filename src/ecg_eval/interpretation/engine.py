@@ -20,7 +20,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from ..models.result import BARELY_ACCEPTABLE, EXCELLENT, UNACCEPTABLE
+from ..models.result import BARELY_ACCEPTABLE, EXCELLENT, UNACCEPTABLE, sqi_label
 from ..analysis.statistics import SQI_COLUMNS, class_distribution, describe
 
 POSITIONS = ("SUPINE", "SITTING", "STANDING")
@@ -234,8 +234,11 @@ def describe_frame(result: Any) -> str:
     ]
     lines.append("")
     lines.append(
-        f"SQI values: qSQI {_fmt(result.q_sqi)}, pSQI {_fmt(result.p_sqi)}, "
-        f"kSQI {_fmt(result.k_sqi)}, basSQI {_fmt(result.bas_sqi)}."
+        "SQI values: "
+        f"{sqi_label('qSQI')} {_fmt(result.q_sqi)}, "
+        f"{sqi_label('pSQI')} {_fmt(result.p_sqi)}, "
+        f"{sqi_label('kSQI')} {_fmt(result.k_sqi)}, "
+        f"{sqi_label('basSQI')} {_fmt(result.bas_sqi)}."
     )
 
     if result.quality_class == UNACCEPTABLE:
@@ -249,7 +252,7 @@ def describe_frame(result: Any) -> str:
         lines.append("Unacceptable quality primarily associated with:")
         for column in low:
             info = SQI_INTERPRETATION[column]
-            lines.append(f"- **{column}** ({info['name']}): {_fmt(sqi_values[column])}. {info['low_measurement']}")
+            lines.append(f"- **{sqi_label(column)}** ({info['name']}): {_fmt(sqi_values[column])}. {info['low_measurement']}")
     return _guard("\n".join(lines))
 
 
@@ -285,10 +288,11 @@ def position_comparison_text(position_df: pd.DataFrame, comparison: dict[str, An
         position = row["position"]
         lines.append(
             f"- **{position}**: n={int(row['n_frames'])} frames; "
-            f"qSQI mean {_fmt(row.get('qSQI_mean'))} / median {_fmt(row.get('qSQI_median'))}; "
-            f"pSQI mean {_fmt(row.get('pSQI_mean'))}; "
-            f"kSQI mean {_fmt(row.get('kSQI_mean'))}; "
-            f"basSQI mean {_fmt(row.get('basSQI_mean'))}; "
+            f"{sqi_label('qSQI')} mean {_fmt(row.get('qSQI_mean'))} / "
+            f"median {_fmt(row.get('qSQI_median'))}; "
+            f"{sqi_label('pSQI')} mean {_fmt(row.get('pSQI_mean'))}; "
+            f"{sqi_label('kSQI')} mean {_fmt(row.get('kSQI_mean'))}; "
+            f"{sqi_label('basSQI')} mean {_fmt(row.get('basSQI_mean'))}; "
             f"{_pct(row.get(f'pct_{EXCELLENT}', float('nan')))} {EXCELLENT}, "
             f"{_pct(row.get(f'pct_{BARELY_ACCEPTABLE}', float('nan')))} {BARELY_ACCEPTABLE}, "
             f"{_pct(row.get(f'pct_{UNACCEPTABLE}', float('nan')))} {UNACCEPTABLE}."

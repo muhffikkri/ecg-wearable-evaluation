@@ -15,7 +15,14 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ..models.result import BARELY_ACCEPTABLE, EXCELLENT, UNACCEPTABLE
+from ..models.result import (
+    BARELY_ACCEPTABLE,
+    EXCELLENT,
+    SQI_KEYS,
+    SQI_LABELS as _SQI_LABELS,
+    UNACCEPTABLE,
+    sqi_label,
+)
 
 CLASS_COLORS = {
     EXCELLENT: "#2e7d32",
@@ -25,6 +32,97 @@ CLASS_COLORS = {
 }
 POSITION_COLORS = {"SUPINE": "#1565c0", "SITTING": "#6a1b9a", "STANDING": "#ef6c00"}
 SQI_COLORS = {"qSQI": "#1565c0", "pSQI": "#2e7d32", "kSQI": "#6a1b9a", "basSQI": "#ef6c00"}
+
+#: Display names for the signal-quality indices.
+#:
+#: The short codes (``qSQI`` and friends) stay as the column names in the result
+#: table, the config keys and the exported CSV, because those are data and are
+#: referenced everywhere downstream. Only the *label a reader sees* changes, so
+#: a figure or a report never has to explain what "pSQI" was supposed to mean.
+SQI_LABELS = _SQI_LABELS
+SQI_ORDER = SQI_KEYS
+
+#: Light-mode palette for print/report use. These figures are meant to sit in a
+#: document, so the background and text colours are pinned explicitly instead of
+#: inheriting whatever theme the surrounding app happens to be running.
+PAPER_COLOR = "#ffffff"
+PLOT_COLOR = "#ffffff"
+INK = "#102a43"
+INK_SOFT = "#486581"
+GRID = "#d9e2ec"
+
+
+def _style(
+    figure: go.Figure,
+    *,
+    title: str = "",
+    height: int = 460,
+    left: int = 76,
+    right: int = 24,
+    top: int = 84,
+    bottom: int = 108,
+    showlegend: bool = True,
+) -> go.Figure:
+    """Apply the shared light-mode report style.
+
+    The title is pinned to the *container* (the whole figure) and the legend is
+    pushed *below the plotting area*. Both used to be anchored near the top of
+    the plot, so any figure with a legend drawn a long detector or band name
+    printed straight through its own title. Anchoring them to opposite ends
+    makes overlap structurally impossible rather than a matter of margins.
+    """
+    # NOTE: ``update_layout(legend=None)`` is a no-op, not a reset, so the
+    # no-legend case has to go through the top-level ``showlegend`` flag.
+    figure.update_layout(
+        template="plotly_white",
+        paper_bgcolor=PAPER_COLOR,
+        plot_bgcolor=PLOT_COLOR,
+        font=dict(family="Arial, Helvetica, sans-serif", size=13, color=INK),
+        colorway=list(CLASS_COLORS.values()),
+        height=height,
+        margin=dict(l=left, r=right, t=top, b=bottom),
+        showlegend=showlegend,
+        legend=(
+            dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.17,
+                xanchor="left",
+                x=0,
+                font=dict(size=11, color=INK_SOFT),
+                title_text="",
+            )
+            if showlegend
+            else dict()
+        ),
+        hovermode="closest",
+    )
+    if title:
+        figure.update_layout(
+            title=dict(
+                text=title,
+                x=0.012,
+                xref="container",
+                xanchor="left",
+                y=0.985,
+                yref="container",
+                yanchor="top",
+                font=dict(size=16, color=INK),
+            )
+        )
+    else:
+        figure.update_layout(title_text=None)
+    figure.update_xaxes(
+        gridcolor=GRID, zeroline=False, linecolor=GRID,
+        tickfont=dict(size=11, color=INK_SOFT),
+        title_font=dict(size=12, color=INK),
+    )
+    figure.update_yaxes(
+        gridcolor=GRID, zeroline=False, linecolor=GRID,
+        tickfont=dict(size=11, color=INK_SOFT),
+        title_font=dict(size=12, color=INK),
+    )
+    return figure
 
 
 def _time_axis(signal: np.ndarray, sampling_rate: float) -> np.ndarray:
@@ -118,15 +216,19 @@ def ecg_figure(
             )
         )
 
-    figure.update_layout(
-        title=title or None,
+    _style(
+        figure,
+        title=title,
         height=height,
-        margin=dict(l=60, r=20, t=40 if title else 12, b=40),
+        left=76,
+        right=24,
+        top=84 if title else 40,
+        bottom=112,
+        showlegend=True,
+    )
+    figure.update_layout(
         xaxis_title="Time (s)",
         yaxis_title="Amplitude (mV)",
-        hovermode="closest",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        template="plotly_white",
         uirevision=title or "ecg",
     )
     figure.update_xaxes(showgrid=True, zeroline=False)
@@ -140,7 +242,7 @@ def multilead_figure(
     lead_names: Sequence[str] = ("Lead I", "Lead II", "Lead III"),
     *,
     title: str = "ECG leads",
-    height: int = 460,
+    height: int = 620,
 ) -> go.Figure:
     """Stacked per-lead view, useful for spotting which lead carries motion."""
     signal = np.asarray(signal, dtype=np.float64)
@@ -148,9 +250,15 @@ def multilead_figure(
     names = list(lead_names)[:n_leads] or [f"ch{i}" for i in range(n_leads)]
     t = _time_axis(signal, sampling_rate)
 
+    # Each subplot carries its own header. They used to be spaced by 4% of the
+    # plot height, which is less than the text needs, so a lead name printed over
+    # the trace below it. The spacing is now generous and the headers are styled
+    # explicitly rather than inheriting the figure font.
     figure = make_subplots(
         rows=n_leads, cols=1, shared_xaxes=True,
-        vertical_spacing=0.04, subplot_titles=[f"{name} (mV)" for name in names],
+        vertical_spacing=0.11,
+        row_heights=[1.0] * n_leads,
+        subplot_titles=[f"{name} (mV)" for name in names],
     )
     for index in range(n_leads):
         figure.add_trace(
@@ -158,9 +266,20 @@ def multilead_figure(
                        line=dict(width=1.2, color="#1565c0"), showlegend=False),
             row=index + 1, col=1,
         )
-    figure.update_layout(
-        title=title, height=height, template="plotly_white",
-        margin=dict(l=60, r=20, t=40, b=40), hovermode="closest",
+    figure.update_annotations(
+        font=dict(size=12, color=INK),
+        xanchor="left",
+        x=0,
+    )
+    _style(
+        figure,
+        title=title,
+        height=height,
+        left=76,
+        right=24,
+        top=84,
+        bottom=84,
+        showlegend=False,
     )
     figure.update_xaxes(title_text="Time (s)", row=n_leads, col=1)
     return figure
@@ -172,36 +291,51 @@ def psd_figure(
     *,
     qrs_band: tuple[float, float] | None = None,
     baseline_band: tuple[float, float] | None = None,
-    height: int = 380,
+    height: int = 620,
     title: str = "Power spectral density",
 ) -> go.Figure:
-    """PSD with the configured QRS and baseline bands shaded."""
+    """PSD with the configured QRS and baseline bands shaded.
+
+    The band captions are anchored *inside* the plotting area rather than above
+    it. ``add_vrect``'s default ``"top"`` position puts them in the same band as
+    the figure title, which is where they previously collided; and the full
+    descriptive band names are longer than the codes they replaced, so they are
+    staggered top/bottom to stay clear of each other and of the curve.
+    """
     figure = go.Figure()
     figure.add_trace(
-        go.Scatter(x=list(frequencies), y=list(psd), mode="lines", name="PSD",
+        go.Scatter(x=list(frequencies), y=list(psd), mode="lines", name="Power spectral density",
                    line=dict(width=1.4, color="#37474f"))
     )
-    for band, color, label in (
-        (qrs_band, "#2e7d32", "QRS band (pSQI)"),
-        (baseline_band, "#ef6c00", "Baseline band (basSQI)"),
+    for band, color, label, where in (
+        (qrs_band, "#2e7d32", sqi_label("pSQI"), "inside top"),
+        (baseline_band, "#ef6c00", sqi_label("basSQI"), "inside bottom"),
     ):
         if not band:
             continue
         figure.add_vrect(
-            x0=band[0], x1=band[1], fillcolor=color, opacity=0.15,
-            line_width=0, annotation_text=label, annotation_position="top",
+            x0=band[0], x1=band[1], fillcolor=color, opacity=0.13,
+            line_width=0, annotation_text=label, annotation_position=where,
+            annotation_font=dict(size=11, color=INK),
         )
+    _style(
+        figure,
+        title=title,
+        height=height,
+        left=88,
+        right=24,
+        top=84,
+        bottom=96,
+        showlegend=True,
+    )
     figure.update_layout(
-        title=title, height=height, template="plotly_white",
         xaxis_title="Frequency (Hz)", yaxis_title="Power",
-        margin=dict(l=60, r=20, t=40, b=40), hovermode="closest",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     return figure
 
 
 def membership_figure(
-    membership: dict[str, float], *, height: int = 260, title: str = "Fuzzy membership"
+    membership: dict[str, float], *, height: int = 320, title: str = "Fuzzy membership"
 ) -> go.Figure:
     levels = [EXCELLENT, BARELY_ACCEPTABLE, UNACCEPTABLE]
     values = [float(membership.get(level, 0.0)) for level in levels]
@@ -214,16 +348,22 @@ def membership_figure(
             hovertemplate="%{x}: %{y:.4f}<extra></extra>",
         )
     )
-    figure.update_layout(
-        title=title, height=height, template="plotly_white",
-        yaxis=dict(title="Membership", range=[0, 1.15]),
-        margin=dict(l=60, r=20, t=40, b=40), showlegend=False,
+    _style(
+        figure,
+        title=title,
+        height=height,
+        left=76,
+        right=24,
+        top=84,
+        bottom=72,
+        showlegend=False,
     )
+    figure.update_layout(yaxis=dict(title="Membership", range=[0, 1.15]))
     return figure
 
 
 def quality_distribution_figure(
-    df: pd.DataFrame, *, height: int = 380
+    df: pd.DataFrame, *, height: int = 460
 ) -> go.Figure:
     """Stacked bar chart of quality class share per body position."""
     if df.empty:
@@ -245,18 +385,26 @@ def quality_distribution_figure(
             text=[f"{v:.0f}%" if v >= 3 else "" for v in shares[level]],
             textposition="inside",
         )
+    _style(
+        figure,
+        height=height,
+        left=76,
+        right=24,
+        top=48,
+        bottom=108,
+        showlegend=True,
+    )
     figure.update_layout(
-        barmode="stack", height=height, template="plotly_white",
+        barmode="stack",
         yaxis=dict(title="Share of frames (%)", range=[0, 100]),
-        xaxis_title="Body position", margin=dict(l=60, r=20, t=20, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        xaxis_title="Body position",
     )
     return figure
 
 
 def sqi_box_figure(
-    df: pd.DataFrame, columns: Sequence[str] = ("qSQI", "pSQI", "kSQI", "basSQI"),
-    *, height: int = 420,
+    df: pd.DataFrame, columns: Sequence[str] = SQI_ORDER,
+    *, height: int = 560,
 ) -> go.Figure:
     """Box plots of each SQI across the three body positions."""
     if df.empty:
@@ -274,22 +422,31 @@ def sqi_box_figure(
             figure.add_trace(
                 go.Box(
                     y=values, name=f"{position}", legendgroup=column,
-                    legendgrouptitle_text=column if position == positions[0] else None,
+                    legendgrouptitle_text=sqi_label(column) if position == positions[0] else None,
                     marker_color=POSITION_COLORS.get(position, "#546e7a"),
-                    boxmean=True, points="outliers", pointpos=0, jitter=0.3,
+                    boxmean=True, boxpoints="outliers", pointpos=0, jitter=0.3,
                     line=dict(width=1.2),
                 )
             )
-    figure.update_layout(
-        title="SQI distribution by body position", height=height, template="plotly_white",
-        yaxis_title="SQI value", xaxis_title="", margin=dict(l=60, r=20, t=50, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    # The legend now carries four full descriptive names instead of four codes,
+    # so it wraps onto several rows and needs a taller reserved area than the
+    # old one-line legend did.
+    _style(
+        figure,
+        title="Signal quality index distribution by body position",
+        height=height,
+        left=76,
+        right=24,
+        top=84,
+        bottom=180,
+        showlegend=True,
     )
+    figure.update_layout(yaxis_title="Index value", xaxis_title="")
     return figure
 
 
 def heatmap_figure(
-    matrix: pd.DataFrame, *, value_label: str = "mean SQI", height: int = 420
+    matrix: pd.DataFrame, *, value_label: str = "mean index value", height: int = 460
 ) -> go.Figure:
     """Per-subject x position heatmap."""
     if matrix.empty:
@@ -299,66 +456,85 @@ def heatmap_figure(
         go.Heatmap(
             z=z, x=list(matrix.columns), y=list(matrix.index),
             colorscale="RdYlGn", zmid=float(np.nanmean(z)) if np.isfinite(z).any() else None,
-            colorbar=dict(title=value_label),
+            colorbar=dict(title=dict(text=value_label, font=dict(size=11, color=INK_SOFT))),
             hovertemplate="Subject %{y}<br>%{x}: %{z:.3f}<extra></extra>",
         )
     )
-    figure.update_layout(
-        title=f"Per-subject {value_label} by body position",
-        height=height, template="plotly_white",
-        xaxis_title="Body position", yaxis_title="Subject",
-        margin=dict(l=80, r=20, t=50, b=40),
+    _style(
+        figure,
+        title=f"{value_label} per subject and body position",
+        height=height,
+        left=88,
+        right=24,
+        top=84,
+        bottom=72,
+        showlegend=False,
     )
+    figure.update_layout(xaxis_title="Body position", yaxis_title="Subject")
     return figure
 
 
-def sqi_trend_figure(df: pd.DataFrame, *, height: int = 380) -> go.Figure:
+def sqi_trend_figure(df: pd.DataFrame, *, height: int = 460) -> go.Figure:
     """The four SQIs over frame order, coloured by position."""
     if df.empty:
         return go.Figure()
     valid = df[df["valid"]] if "valid" in df else df
     figure = go.Figure()
-    for column in ("qSQI", "pSQI", "kSQI", "basSQI"):
+    for column in SQI_ORDER:
         if column not in valid:
             continue
+        name = sqi_label(column)
         figure.add_trace(
             go.Scatter(
-                y=valid[column], mode="markers", name=column,
+                y=valid[column], mode="markers", name=name,
                 marker=dict(color=[POSITION_COLORS.get(p, "#546e7a") for p in valid["position"]], size=7),
                 hovertemplate=(
-                    f"{column}<br>subject %{{customdata[0]}}<br>position %{{customdata[1]}}"
+                    f"{name}<br>subject %{{customdata[0]}}<br>position %{{customdata[1]}}"
                     "<br>value %{y:.3f}<extra></extra>"
                 ),
                 customdata=np.column_stack([valid["subject_id"], valid["position"], valid["frame_id"]]),
             )
         )
-    figure.update_layout(
-        title="SQI per analysed frame", height=height, template="plotly_white",
-        yaxis_title="SQI value", xaxis_title="Frame index", margin=dict(l=60, r=20, t=50, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    _style(
+        figure,
+        title="Signal quality index per analysed frame",
+        height=height,
+        left=76,
+        right=24,
+        top=84,
+        bottom=150,
+        showlegend=True,
     )
+    figure.update_layout(yaxis_title="Index value", xaxis_title="Frame index")
     return figure
 
 
 def fuzzy_matrix_heatmap(
-    matrix: dict[str, dict[str, float]], *, height: int = 300
+    matrix: dict[str, dict[str, float]], *, height: int = 380
 ) -> go.Figure:
     """The evaluation matrix R, shown so the fuzzy step is inspectable."""
     if not matrix:
         return go.Figure()
-    factors = list(matrix.keys())
+    factors = [sqi_label(f) if f in SQI_LABELS else f for f in matrix]
+    raw_factors = list(matrix.keys())
     levels = list(next(iter(matrix.values())).keys())
-    z = [[float(matrix[f][l]) for l in levels] for f in factors]
+    z = [[float(matrix[f][l]) for l in levels] for f in raw_factors]
     figure = go.Figure(
         go.Heatmap(
             z=z, x=levels, y=factors, colorscale="Blues", zmin=0, zmax=1,
-            colorbar=dict(title="membership"),
+            colorbar=dict(title=dict(text="membership", font=dict(size=11, color=INK_SOFT))),
             hovertemplate="%{y} → %{x}: %{z:.3f}<extra></extra>",
         )
     )
-    figure.update_layout(
-        title="Fuzzy evaluation matrix R", height=height, template="plotly_white",
-        margin=dict(l=90, r=20, t=50, b=40),
+    _style(
+        figure,
+        title="Fuzzy evaluation matrix R",
+        height=height,
+        left=180,
+        right=24,
+        top=84,
+        bottom=72,
+        showlegend=False,
     )
     return figure
 
@@ -367,6 +543,8 @@ __all__ = [
     "CLASS_COLORS",
     "POSITION_COLORS",
     "SQI_COLORS",
+    "SQI_LABELS",
+    "SQI_ORDER",
     "ecg_figure",
     "fuzzy_matrix_heatmap",
     "heatmap_figure",
@@ -375,5 +553,6 @@ __all__ = [
     "psd_figure",
     "quality_distribution_figure",
     "sqi_box_figure",
+    "sqi_label",
     "sqi_trend_figure",
 ]

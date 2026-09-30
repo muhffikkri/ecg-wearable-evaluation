@@ -17,6 +17,25 @@ QUALITY_CLASSES = (EXCELLENT, BARELY_ACCEPTABLE, UNACCEPTABLE)
 
 SQI_KEYS = ("qSQI", "pSQI", "kSQI", "basSQI")
 
+#: Display names for each signal-quality index.
+#:
+#: ``SQI_KEYS`` names stay as the column names in the results table, the config
+#: keys and the exported CSV, because those are data consumed by other code and
+#: written into report artefacts. Only the label a reader sees is spelled out,
+#: so no figure, table or generated paragraph has to make the reader guess what
+#: a code such as "pSQI" stood for.
+SQI_LABELS: dict[str, str] = {
+    "qSQI": "Deteksi R-peak",
+    "pSQI": "Distribusi Daya Spektral QRS",
+    "kSQI": "Kurtosis Sinyal",
+    "basSQI": "Daya Relatif Baseline",
+}
+
+
+def sqi_label(key: str) -> str:
+    """Human-readable name for an SQI key, falling back to the key itself."""
+    return SQI_LABELS.get(key, key)
+
 
 @dataclass
 class PeakMatchResult:

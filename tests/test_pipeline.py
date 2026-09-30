@@ -299,6 +299,46 @@ def test_preprocessing_toggle_invalidates_cached_results(config, make_frame, noi
     assert cache.stats()["entries"] == 3
 
 
+def test_activated_chain_drives_the_analysis(config, make_frame, noisy_signal):
+    """Only the ACTIVATED chain may affect the SQIs.
+
+    The sidebar stages a pending selection and the Activate button commits it,
+    so editing a checkbox alone must not change a computed result.
+    """
+    frame = make_frame(noisy_signal)
+
+    def active(stages):
+        analyzer = FrameAnalyzer(config, cache=ResultCache(None, enabled=False), preprocessing_stages=stages)
+        result = analyzer.analyze_frame(frame, SUPINE)
+        ran = sorted(k for k, v in result.run_provenance["preprocessing_stages"].items() if v)
+        return result, ran
+
+    base = {"applied": True}
+    for stage in STAGE_ORDER:
+        base[stage] = {"enabled": stage in ("wavelet", "baseline", "bandpass")}
+
+    first, ran_first = active(base)
+    assert ran_first == ["bandpass", "baseline", "wavelet"]
+
+    # pending edit, not yet activated: the active chain is what counts
+    pending = {**base, "wavelet": {"enabled": False}}
+    second, ran_second = active(base)
+    assert ran_second == ran_first
+    assert (second.q_sqi, second.p_sqi, second.k_sqi) == (first.q_sqi, first.p_sqi, first.k_sqi)
+
+    # after Activate the committed chain is used, and the values move
+    third, ran_third = active(pending)
+    assert ran_third == ["bandpass", "baseline"]
+    assert (third.q_sqi, third.p_sqi, third.k_sqi) != (first.q_sqi, first.p_sqi, first.k_sqi)
+
+    # activating nothing means the raw signal, honestly reported
+    off = {s: {"enabled": False} for s in STAGE_ORDER}
+    off["applied"] = True
+    fourth, ran_fourth = active(off)
+    assert ran_fourth == []
+    assert fourth.preprocessing_applied is False
+
+
 # ---------------------------------------------------------------------------
 # Frame analysis
 # ---------------------------------------------------------------------------
@@ -807,3 +847,38 @@ def test_dataset_class_is_empty_safe():
     assert dataset.n_frames == 0
     assert dataset.subjects() == []
     assert dataset.frame_by_id("missing") is None
+
+def test_every_figure_builder_produces_a_valid_figure():
+    """Plotly validates trace properties at construction time.
+
+    An invalid keyword (e.g. `points=` instead of `boxpoints=` on a Box) only
+    fails when the chart is actually built, inside the page render, so these
+    builders are exercised here to catch that class of error.
+    """
+    import pandas as pd
+
+    from ecg_eval.visualization.plots import (
+        quality_distribution_figure,
+        sqi_box_figure,
+        sqi_trend_figure,
+    )
+
+    df = pd.DataFrame({
+        "subject_id": ["S01"] * 6,
+        "session_id": ["s1"] * 6,
+        "position": ["SUPINE", "SITTING", "STANDING"] * 2,
+        "frame_id": [f"{i:06d}" for i in range(6)],
+        "qSQI": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4],
+        "pSQI": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        "kSQI": [6.0, 5.5, 5.0, 4.5, 4.0, 3.5],
+        "basSQI": [0.99, 0.97, 0.96, 0.94, 0.92, 0.91],
+        "quality_class": ["Excellent", "Barely Acceptable", "Unacceptable"] * 2,
+        
+    })
+
+    for builder in (quality_distribution_figure, sqi_box_figure, sqi_trend_figure):
+        figure = builder(df)
+        assert figure is not None
+        assert len(figure.data) > 0, builder.__name__
+
+

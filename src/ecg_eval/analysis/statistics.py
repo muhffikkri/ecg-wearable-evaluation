@@ -1,4 +1,4 @@
-﻿"""Descriptive statistics helpers.
+"""Descriptive statistics helpers.
 
 Deliberately explicit about NaN handling: frames with an invalid result stay
 in the frame-level table but are excluded from aggregates, and the exclusion
@@ -44,6 +44,110 @@ def describe(values: Sequence[float]) -> dict[str, float]:
 
 
 CLASS_LEVELS = ("Excellent", "Barely Acceptable", "Unacceptable")
+
+#: The classes a frame must reach to count as usable. "Acceptable" is a
+#: *recording* judgement, not a statement about the wearer, which is why the two
+#: levels below are kept as a named group rather than inlined at each call site.
+ACCEPTED_CLASSES = ("Excellent", "Barely Acceptable")
+
+
+def acceptable_share(
+    df: pd.DataFrame, levels: Sequence[str] = ACCEPTED_CLASSES
+) -> pd.DataFrame:
+    """Per subject and position, the share of frames that reached an accepted class.
+
+    One row per subject per position, so the value describes a single person's
+    recording under a single activity. That is the unit the per-activity box
+    plot needs: one observation per participant, so a participant who recorded
+    one activity cannot drag another activity's spread.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    frame = df[df["valid"]] if "valid" in df else df
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for (subject, position), group in frame.groupby(["subject_id", "position"], dropna=False):
+        total = len(group)
+        accepted = int(group["quality_class"].isin(levels).sum())
+        rows.append(
+            {
+                "subject_id": subject,
+                "position": position,
+                "n_frames": int(total),
+                "n_accepted": accepted,
+                "pct_accepted": 100.0 * accepted / total if total else math.nan,
+            }
+        )
+    order = {"SUPINE": 0, "SITTING": 1, "STANDING": 2}
+    table = pd.DataFrame(rows)
+    table["_order"] = table["position"].map(order).fillna(99)
+    return table.sort_values(["_order", "subject_id"]).drop(columns="_order").reset_index(drop=True)
+
+
+def class_table(df: pd.DataFrame, levels: Sequence[str] = CLASS_LEVELS) -> pd.DataFrame:
+    """Per position: how many frames landed in each class, and the share.
+
+    Every requested level gets a column even when it has no members, so the
+    table never implies a class was skipped rather than empty.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    frame = df[df["valid"]] if "valid" in df else df
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for position, group in frame.groupby("position", dropna=False):
+        total = len(group)
+        counts = group["quality_class"].value_counts()
+        row: dict[str, Any] = {"position": position, "n_frames": int(total)}
+        for level in levels:
+            row[f"count_{level}"] = int(counts.get(level, 0))
+            row[f"pct_{level}"] = 100.0 * int(counts.get(level, 0)) / total if total else math.nan
+        row["pct_accepted"] = sum(
+            row[f"pct_{level}"] for level in levels if level in ACCEPTED_CLASSES
+        )
+        rows.append(row)
+
+    order = {"SUPINE": 0, "SITTING": 1, "STANDING": 2}
+    table = pd.DataFrame(rows)
+    table["_order"] = table["position"].map(order).fillna(99)
+    return table.sort_values("_order").drop(columns="_order").reset_index(drop=True)
+
+
+def box_outliers(
+    values: Sequence[float], *, fences: float = 1.5
+) -> tuple[dict[str, float], list[float]]:
+    """Tukey five-number summary plus the points beyond the fences.
+
+    Returns the summary and the outlier values separately, so a caller can draw
+    the box and the outlier dots as two independent traces. Plotly can do this
+    itself with ``boxpoints='outliers'``, but then the dots cannot be given
+    their own legend entry or colour without also restyling the box.
+    """
+    array = np.asarray(
+        [v for v in values if v is not None and np.isfinite(v)], dtype=np.float64
+    )
+    if array.size == 0:
+        return {}, []
+    q1, q3 = (float(v) for v in np.percentile(array, [25, 75]))
+    iqr = q3 - q1
+    low = q1 - fences * iqr
+    high = q3 + fences * iqr
+    inside = array[(array >= low) & (array <= high)]
+    summary = {
+        "n": int(array.size),
+        "min": float(np.min(inside)),
+        "q1": q1,
+        "median": float(np.median(array)),
+        "q3": q3,
+        "max": float(np.max(inside)),
+        "lower_fence": low,
+        "upper_fence": high,
+    }
+    return summary, [float(v) for v in array if v < low or v > high]
 
 
 def class_distribution(classes: Sequence[str]) -> dict[str, float]:
@@ -152,12 +256,73 @@ def overall_summary(df: pd.DataFrame) -> dict[str, Any]:
     return summary
 
 
+_POSITION_ORDER = {"SUPINE": 0, "SITTING": 1, "STANDING": 2}
+
+
+def _in_position_order(table: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """Sort a position-keyed table into Berbaring, Duduk, Berdiri order."""
+    table = table.copy()
+    table["_order"] = table["position"].map(_POSITION_ORDER).fillna(99)
+    keys = ["_order", *by] if by else ["_order"]
+    return table.sort_values(keys).drop(columns="_order").reset_index(drop=True)
+
+
+def activity_recap(
+    df: pd.DataFrame,
+    levels: Sequence[str] = CLASS_LEVELS,
+    columns: Sequence[str] = SQI_COLUMNS,
+) -> pd.DataFrame:
+    """Per-activity recap: class counts, acceptance share and SQI summaries.
+
+    This is the aggregate the report is built around. Unlike
+    :func:`acceptable_share`, which gives one value per person per activity,
+    every row here pools all frames of one activity, so the row states what the
+    whole activity produced. The SQI columns keep the underlying spread
+    (``mean``/``median``/``sd``) so the recap table and the box plot drawn from
+    the same frames can be checked against each other.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    frame = df[df["valid"]] if "valid" in df else df
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for position, group in frame.groupby("position", dropna=False):
+        total = len(group)
+        counts = group["quality_class"].value_counts()
+        row: dict[str, Any] = {"position": position, "n_frames": int(total)}
+        for level in levels:
+            row[f"count_{level}"] = int(counts.get(level, 0))
+            row[f"pct_{level}"] = (
+                100.0 * int(counts.get(level, 0)) / total if total else math.nan
+            )
+        row["pct_accepted"] = sum(
+            row[f"pct_{level}"] for level in levels if level in ACCEPTED_CLASSES
+        )
+        for column in columns:
+            if column not in group:
+                continue
+            stats = describe(group[column].dropna().tolist())
+            row[f"{column}_mean"] = stats["mean"]
+            row[f"{column}_median"] = stats["median"]
+            row[f"{column}_sd"] = stats["sd"]
+        rows.append(row)
+
+    return _in_position_order(pd.DataFrame(rows), [])
+
+
 __all__ = [
+    "ACCEPTED_CLASSES",
     "CLASS_COLUMNS",
     "CLASS_LEVELS",
     "SQI_COLUMNS",
+    "acceptable_share",
+    "activity_recap",
     "aggregate_by",
+    "box_outliers",
     "class_distribution",
+    "class_table",
     "describe",
     "overall_summary",
     "position_summary",

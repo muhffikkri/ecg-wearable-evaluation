@@ -69,6 +69,11 @@ def render(ctx: dict) -> None:
     subject = st.selectbox("Subject", dataset.subjects())
     subject_sessions = sorted({s for (s, _) in dataset.sessions() if s == subject})
     session = st.selectbox("Session", subject_sessions)
+    # Same stale-selection trap as the Annotation page: the session list depends
+    # on the subject, so a session id kept from a previous subject resolves to
+    # zero frames and looks like a broken recording.
+    if session not in subject_sessions:
+        session = subject_sessions[0] if subject_sessions else ""
     frames = dataset.session_frames(subject, session)
     if not frames:
         st.warning("This session has no readable frames.")

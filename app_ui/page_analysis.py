@@ -10,13 +10,28 @@ from ecg_eval.ingestion import annotation_coverage, dataset_summary
 from ecg_eval.models.result import BARELY_ACCEPTABLE, EXCELLENT, UNACCEPTABLE
 from ecg_eval.visualization import (
     ecg_figure,
+    ecg_legend,
     fuzzy_matrix_heatmap,
+    fuzzy_matrix_interpretation,
+    fuzzy_matrix_legend,
     heatmap_figure,
+    heatmap_interpretation,
+    heatmap_legend,
     membership_figure,
+    membership_interpretation,
+    membership_legend,
     psd_figure,
+    psd_legend,
     quality_distribution_figure,
+    quality_distribution_interpretation,
+    quality_distribution_legend,
     sqi_box_figure,
+    sqi_box_interpretation,
+    sqi_box_legend,
+    sqi_label,
     sqi_trend_figure,
+    sqi_trend_interpretation,
+    sqi_trend_legend,
 )
 
 from .common import header, results_frame, run_or_get_analysis
@@ -95,8 +110,14 @@ def render(ctx: dict) -> None:
                 "against Zhao & Zhang (2018). This run is a structured reproduction, not a "
                 "verified one."
             )
+            # `pending` mixes numbers and strings (e.g. k_sqi.definition is
+            # "fisher"), which Arrow refuses to put in one column, so the values
+            # are rendered as text.
             st.dataframe(
-                pd.DataFrame(pending, columns=["parameter", "value"]),
+                pd.DataFrame(
+                    [(path, str(value)) for path, value in pending],
+                    columns=["parameter", "value"],
+                ),
                 use_container_width=True, hide_index=True,
             )
 
@@ -126,10 +147,10 @@ def render(ctx: dict) -> None:
     )
 
     metrics = st.columns(4)
-    metrics[0].metric("qSQI", f"{result.q_sqi:.3f}" if result.valid else "n/a")
-    metrics[1].metric("pSQI", f"{result.p_sqi:.3f}" if result.valid else "n/a")
-    metrics[2].metric("kSQI", f"{result.k_sqi:.3f}" if result.valid else "n/a")
-    metrics[3].metric("basSQI", f"{result.bas_sqi:.3f}" if result.valid else "n/a")
+    metrics[0].metric(sqi_label("qSQI"), f"{result.q_sqi:.3f}" if result.valid else "n/a")
+    metrics[1].metric(sqi_label("pSQI"), f"{result.p_sqi:.3f}" if result.valid else "n/a")
+    metrics[2].metric(sqi_label("kSQI"), f"{result.k_sqi:.3f}" if result.valid else "n/a")
+    metrics[3].metric(sqi_label("basSQI"), f"{result.bas_sqi:.3f}" if result.valid else "n/a")
 
     fuzzy_cols = st.columns(4)
     fuzzy_cols[0].metric(f"Fuzzy · {EXCELLENT}", f"{result.fuzzy_excellent:.3f}" if result.valid else "n/a")
@@ -170,11 +191,13 @@ def render(ctx: dict) -> None:
             use_container_width=True,
         )
         st.caption(
-            f"qSQI = {result.n_matched} matched peaks / min({result.n_peaks_a}, {result.n_peaks_b}) "
+            f"{sqi_label('qSQI')} = {result.n_matched} matched peaks / "
+            f"min({result.n_peaks_a}, {result.n_peaks_b}) "
             f"= {result.q_sqi:.3f} at a tolerance of "
             f"{detail.get('match_tolerance_ms', float('nan')):.0f} ms. "
             f"Method: {detail.get('q_sqi_method', '')}."
         )
+        st.caption(ecg_legend())
 
     with st.expander("Intermediates: PSD, kurtosis, fuzzy matrix"):
         spectral = result.run_provenance.get("spectral", {})
@@ -197,6 +220,7 @@ def render(ctx: dict) -> None:
                 ),
                 use_container_width=True,
             )
+            st.caption(psd_legend())
 
         a, b, c = st.columns(3)
         a.metric("QRS band power", f"{spectral.get('qrs_band_power', float('nan')):.4g}")
@@ -213,10 +237,18 @@ def render(ctx: dict) -> None:
                     membership_figure(fuzzy.get("membership", {})),
                     use_container_width=True,
                 )
+                st.caption(membership_legend())
+                st.caption(
+                    membership_interpretation(fuzzy.get("membership", {}))
+                )
             with right:
                 st.plotly_chart(
                     fuzzy_matrix_heatmap(fuzzy.get("evaluation_matrix", {})),
                     use_container_width=True,
+                )
+                st.caption(fuzzy_matrix_legend())
+                st.caption(
+                    fuzzy_matrix_interpretation(fuzzy.get("evaluation_matrix", {}))
                 )
             st.caption(
                 f"Weights: {fuzzy.get('weights', {})} · synthesis: {fuzzy.get('synthesis', '')}. "
@@ -229,17 +261,30 @@ def render(ctx: dict) -> None:
     st.dataframe(
         subject_summary(df[df["valid"]]), use_container_width=True, hide_index=True,
     )
+    st.caption(
+        "**Legenda tabel.** Baris adalah peserta, kolom adalah aktivitas "
+        "rekaman. `mean`, `median`, dan `sd` adalah rata-rata, nilai tengah, dan "
+        "simpangan baku tiap indeks kualitas sinyal pada frame yang dianalisis "
+        "oleh peserta tersebut pada aktivitas itu. Nama indeks memakai Bahasa "
+        "Indonesia di header, sedangkan file ekspor tetap memakai kode mesin."
+    )
 
     # -- level 3: overall ----------------------------------------------
     st.divider()
     st.subheader("Level 3 — overall and position comparison")
     position_df = position_summary(df[df["valid"]])
     st.dataframe(position_df, use_container_width=True, hide_index=True)
+    st.caption(
+        "**Legenda tabel.** Baris adalah aktivitas rekaman. Kolom berisi "
+        "ringkasan tiap indeks kualitas sinyal dan sebaran kelas penerimaan "
+        "kualitas pada frame yang dianalisis di aktivitas tersebut."
+    )
 
     if not position_df.empty:
+        valid_df = df[df["valid"]]
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(quality_distribution_figure(df[df["valid"]]), use_container_width=True)
+            st.plotly_chart(quality_distribution_figure(valid_df), use_container_width=True)
         with right:
             st.plotly_chart(sqi_box_figure(df), use_container_width=True)
 
@@ -250,9 +295,21 @@ def render(ctx: dict) -> None:
         )
         order = [p for p in ("SUPINE", "SITTING", "STANDING") if p in matrix.columns]
         st.plotly_chart(
-            heatmap_figure(matrix[order] if order else matrix, value_label="mean qSQI"),
+            heatmap_figure(
+                matrix[order] if order else matrix,
+                value_label=f"mean {sqi_label('qSQI')}",
+            ),
             use_container_width=True,
         )
+        st.caption(heatmap_legend())
+        st.caption(heatmap_interpretation(matrix[order] if order else matrix))
+
+        st.caption(quality_distribution_legend())
+        st.caption(quality_distribution_interpretation(valid_df))
+        st.caption(sqi_box_legend())
+        st.caption(sqi_box_interpretation(df))
+        st.caption(sqi_trend_legend())
+        st.caption(sqi_trend_interpretation(df))
 
         st.subheader("Statistical analysis")
         comparison = position_comparison(
@@ -264,7 +321,7 @@ def render(ctx: dict) -> None:
         for column, outcome in comparison["tests"].items():
             rows.append(
                 {
-                    "SQI": column,
+                    "Signal quality index": sqi_label(column),
                     "test": outcome.get("test"),
                     "status": outcome.get("status"),
                     "n_subjects": outcome.get("n_subjects"),
@@ -275,6 +332,15 @@ def render(ctx: dict) -> None:
                 }
             )
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "**Legenda tabel.** Satu baris untuk tiap indeks kualitas sinyal. "
+            "`test` adalah uji statistik yang dipilih, `n_subjects` adalah jumlah "
+            "peserta yang datanya lengkap, `statistic` dan `p_value` adalah "
+            "hasilnya, dan kolom `detectable difference` menyatakan apakah "
+            "perbedaan antar aktivitas dapat dibedakan dengan ukuran sampel ini. "
+            "Kolom status dan disclaimer di bawahnya tetap berbahasa Inggris "
+            "karena berasal langsung dari modul statistik."
+        )
         st.caption(comparison["disclaimer"])
         st.session_state["comparison"] = comparison
 
@@ -282,6 +348,13 @@ def render(ctx: dict) -> None:
     st.divider()
     st.subheader("Frame-level results")
     st.dataframe(df, use_container_width=True, hide_index=True)
+    st.caption(
+        "**Legenda tabel.** Satu baris untuk setiap frame yang dianalisis. "
+        "Kolom frame memakai kode mesin `qSQI`, `pSQI`, `kSQI`, dan `basSQI` "
+        "agar isi tabel persis sama dengan file CSV yang diunduh; nama "
+        "Bahasa Indonesia untuk indeks tersebut tercetak pada tabel ringkasan "
+        "di atas."
+    )
     st.download_button(
         "Download frame results (CSV)",
         df.to_csv(index=False).encode("utf-8"),

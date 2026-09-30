@@ -10,16 +10,52 @@ import pandas as pd
 import streamlit as st
 
 from ecg_eval.analysis import export_results, subject_summary, write_markdown
+from ecg_eval.analysis.statistics import acceptable_share, activity_recap, class_table
 from ecg_eval.interpretation import build_report, describe_frame, problematic_frames
 from ecg_eval.models.result import BARELY_ACCEPTABLE, EXCELLENT, UNACCEPTABLE
 from ecg_eval.visualization import (
+    POSITION_SUMMARY_LABELS,
+    SQI_ORDER,
+    acceptance_table,
+    acceptance_table_interpretation,
+    acceptance_table_legend,
+    class_label,
+    activity_recap_distribution_interpretation,
+    activity_recap_distribution_legend,
+    activity_recap_figure,
+    activity_recap_interpretation,
+    activity_recap_legend,
+    activity_recap_table,
     ecg_figure,
+    ecg_legend,
     membership_figure,
+    membership_interpretation,
+    membership_legend,
+    position_label,
     psd_figure,
+    psd_interpretation,
+    psd_legend,
+    quality_by_activity_figure,
+    quality_by_activity_interpretation,
+    quality_by_activity_legend,
     quality_distribution_figure,
+    quality_distribution_interpretation,
+    quality_distribution_legend,
+    sqi_box_figure,
+    sqi_box_interpretation,
+    sqi_box_legend,
+    sqi_label,
+    sqi_stat_columns,
+    sqi_stat_display_names,
 )
 
 from .common import header, results_frame
+
+#: The analysis frames keep machine names (``qSQI_mean``, ``position``) so the
+#: exported CSV and the report still line up with the analysis code; only the
+#: header a reader sees changes. The mapping lives in ``labels_id`` so every
+#: table on this page spells its columns the same way.
+_DISPLAY_NAMES = {**POSITION_SUMMARY_LABELS, **sqi_stat_display_names()}
 
 
 def _guard(text: str) -> None:
@@ -75,26 +111,115 @@ def render(ctx: dict) -> None:
     d.metric(f"% {UNACCEPTABLE}", f"{100 * counts.get(UNACCEPTABLE, 0) / total:.1f}%")
 
     st.plotly_chart(quality_distribution_figure(valid), use_container_width=True)
+    st.caption(quality_distribution_legend())
+    st.caption(quality_distribution_interpretation(valid))
 
     # -- by position ---------------------------------------------------
     st.subheader("By position")
     st.dataframe(
-        position_df[[
-            "position", "n_frames",
-            "qSQI_mean", "qSQI_median", "qSQI_sd",
-            "pSQI_mean", "pSQI_median", "pSQI_sd",
-            "kSQI_mean", "kSQI_median", "kSQI_sd",
-            "basSQI_mean", "basSQI_median", "basSQI_sd",
-        ]] if not position_df.empty else position_df,
+        position_df[["position", "n_frames", *sqi_stat_columns()]].rename(
+            columns=_DISPLAY_NAMES
+        ) if not position_df.empty else position_df,
         use_container_width=True, hide_index=True,
     )
+    st.caption(
+        "**Legenda tabel.** Baris adalah aktivitas rekaman. Tiga ukuran "
+        "setiap indeks kualitas sinyal dihitung dari frame yang dianalisis di "
+        "aktivitas tersebut: `rata-rata`, `tengah` (median), dan `simpangan "
+        "baku` (rumus contoh, ddof=1). Nama indeks memakai Bahasa Indonesia di "
+        "header, sedangkan file ekspor tetap memakai kode mesin seperti "
+        "`qSQI_mean`. Tabel ini merangkum frame yang sama dengan tabel "
+        "rekapitulasi di bawah, tetapi menyimpan nilai indeks secara langsung, "
+        "bukan kelas penerimaannya."
+    )
+    if not position_df.empty:
+        # The box plot needs the frame-level rows: it plots every analysed
+        # frame, grouped by activity, so the summary table cannot feed it.
+        st.plotly_chart(sqi_box_figure(valid), use_container_width=True)
+        st.caption(sqi_box_legend())
+        st.caption(sqi_box_interpretation(valid))
+
+    # -- klasifikasi kualitas per aktivitas ------------------------------
+    st.divider()
+    st.subheader("Kualitas penerimaan per aktivitas")
+    classes = class_table(valid)
+    share = acceptable_share(valid)
+
+    st.markdown("**Tabel total klasifikasi kualitas per aktivitas**")
+    table = acceptance_table(classes)
+    if table.empty:
+        st.info("Belum ada frame yang dapat dikelompokkan per aktivitas.")
+    else:
+        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.caption(acceptance_table_legend())
+        st.caption(acceptance_table_interpretation(classes))
+
+    st.markdown("**Kualitas sinyal per peserta dan aktivitas**")
+    if share.empty:
+        st.info("Belum ada data per peserta untuk digambar.")
+    else:
+        st.plotly_chart(quality_by_activity_figure(share), use_container_width=True)
+        st.caption(quality_by_activity_legend())
+        st.caption(quality_by_activity_interpretation(share))
+        with st.expander("Data nilai yang digambar pada figure"):
+            detail = share.copy()
+            detail["Aktivitas"] = detail["position"].map(position_label)
+            detail = detail.rename(
+                columns={
+                    "subject_id": "Peserta",
+                    "n_frames": "Total Frame",
+                    "n_accepted": "Diterima (n)",
+                    "pct_accepted": "Diterima (%)",
+                }
+            )
+            st.dataframe(
+                detail[["Peserta", "Aktivitas", "Total Frame",
+                        "Diterima (n)", "Diterima (%)"]],
+                use_container_width=True, hide_index=True,
+            )
+
+    # -- rekapitulasi per aktivitas --------------------------------------
+    st.divider()
+    st.subheader("Rekapitulasi per aktivitas")
+    recap = activity_recap(valid)
+    st.caption(
+        "Bagian ini menggabungkan seluruh frame satu aktivitas menjadi satu "
+        "baris. Tabel di bawah merangkum kelas penerimaan sekaligus sebaran "
+        "empat indeks kualitas sinyal, sedangkan figure menunjukkan sebaran "
+        "frame yang mendasarinya. Perbandingan dengan figure per peserta "
+        "diatas: yang satu menggabungkan frame per aktivitas, yang satu lagi "
+        "memberi satu nilai per peserta."
+    )
+
+    st.markdown("**Tabel rekapitulasi per aktivitas**")
+    recap_display = activity_recap_table(recap)
+    if recap_display.empty:
+        st.info("Belum ada frame yang dapat direkap per aktivitas.")
+    else:
+        st.dataframe(recap_display, use_container_width=True, hide_index=True)
+        st.caption(activity_recap_legend())
+        st.caption(activity_recap_interpretation(recap))
+
+    st.markdown("**Sebaran indeks kualitas sinyal per aktivitas**")
+    if recap_display.empty:
+        st.info("Belum ada data untuk digambar.")
+    else:
+        st.plotly_chart(activity_recap_figure(valid), use_container_width=True)
+        st.caption(activity_recap_distribution_legend())
+        st.caption(activity_recap_distribution_interpretation(valid))
 
     # -- problematic frames --------------------------------------------
     st.subheader("Problematic frames")
     problems = problematic_frames(df, limit=50)
     st.caption(
-        "Frames ranked by Unacceptable membership. Click one to inspect its waveform, "
-        "R-peaks, PSD, SQIs and fuzzy membership."
+        "**Legenda tabel.** Frame diurutkan berdasarkan nilai keanggotaan "
+        "*Tidak Diterima* (`U`) dari yang tertinggi. Kolom aktivitas, identitas "
+        "frame, kelas kualitas, dan indeks kualitas sudah memakai Bahasa "
+        "Indonesia; nilai keanggotaan ditampilkan apa adanya sebagai angka "
+        "keanggotaan 0-1 agar bisa dibandingkan langsung dengan `U` pada "
+        "penyaring dan file ekspor. Pilih satu baris untuk melihat gelombang, "
+        "puncak R, spektral, indeks kualitas, dan keanggotaan fuzzy frame "
+        "tersebut."
     )
     if problems.empty:
         st.info("No problematic frames to inspect.")
@@ -102,15 +227,22 @@ def render(ctx: dict) -> None:
         table = problems[[
             "subject_id", "position", "frame_id",
             "qSQI", "pSQI", "kSQI", "basSQI",
-            "fuzzy_excellent", "fuzzy_barely_acceptable", "fuzzy_unacceptable", "quality_class",
-        ]]
+            "fuzzy_excellent", "fuzzy_unacceptable", "quality_class",
+        ]].rename(columns={**POSITION_SUMMARY_LABELS,
+                           "subject_id": "Peserta",
+                           "frame_id": "Frame",
+                           "fuzzy_excellent": "Keanggotaan Sangat Baik",
+                           "fuzzy_unacceptable": "Keanggotaan Tidak Diterima (U)",
+                           "quality_class": "Kelas Kualitas",
+                           **{column: sqi_label(column) for column in SQI_ORDER}})
         st.dataframe(table, use_container_width=True, hide_index=True)
 
         pick = st.selectbox(
             "Inspect frame", list(range(len(problems))),
             format_func=lambda i: (
-                f"{problems.iloc[i]['subject_id']} · {problems.iloc[i]['position']} · "
-                f"frame {problems.iloc[i]['frame_id']} · {problems.iloc[i]['quality_class']} · "
+                f"{position_label(problems.iloc[i]['position'])} · "
+                f"frame {problems.iloc[i]['frame_id']} · "
+                f"{class_label(problems.iloc[i]['quality_class'])} · "
                 f"U={problems.iloc[i]['fuzzy_unacceptable']:.3f}"
             ),
         )
@@ -150,6 +282,7 @@ def render(ctx: dict) -> None:
                 ),
                 use_container_width=True,
             )
+            st.caption(ecg_legend())
 
             from ecg_eval.sqi import compute_psd
 
@@ -158,15 +291,24 @@ def render(ctx: dict) -> None:
                 signal, frame.sampling_rate,
                 nperseg=int(config.get("p_sqi.psd_nperseg", 500)),
             )
+            qrs_band = tuple(config.get("p_sqi.qrs_band_hz", (5, 15)))
             left, right = st.columns(2)
             with left:
                 st.plotly_chart(
                     psd_figure(
                         frequencies, psd,
-                        qrs_band=tuple(config.get("p_sqi.qrs_band_hz", (5, 15))),
+                        qrs_band=qrs_band,
                         baseline_band=tuple(config.get("bas_sqi.baseline_band_hz", (0, 1))),
                     ),
                     use_container_width=True,
+                )
+                st.caption(psd_legend())
+                st.caption(
+                    psd_interpretation(
+                        frequencies, psd, qrs_band=qrs_band,
+                        analysis_band=(float(frequencies.min()), float(frequencies.max()))
+                        if len(frequencies) else None,
+                    )
                 )
             with right:
                 fuzzy = result.run_provenance.get("fuzzy", {})
@@ -174,6 +316,10 @@ def render(ctx: dict) -> None:
                     st.plotly_chart(
                         membership_figure(fuzzy.get("membership", {})),
                         use_container_width=True,
+                    )
+                    st.caption(membership_legend())
+                    st.caption(
+                        membership_interpretation(fuzzy.get("membership", {}))
                     )
 
     # -- full report ----------------------------------------------------
