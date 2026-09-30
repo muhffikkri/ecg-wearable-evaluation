@@ -25,6 +25,9 @@ MAPPING_UNRESOLVED = "unresolved"
 #: The model_ready JSON names the file it was built from, so the link is
 #: recorded by the firmware rather than inferred.
 MAPPING_METHOD_RECORDED_POINTER = "recorded_pointer"
+#: Both sides carry the same ``source_metadata.measurement_id``, the UUID of the
+#: physical measurement, which is how calibrated/ and filtered/ are joined.
+MAPPING_METHOD_MEASUREMENT_ID = "measurement_id"
 #: Both sides carry a timestamp that matched within a tolerance.
 MAPPING_METHOD_TIMESTAMP = "timestamp"
 #: No link could be established; the frame is kept but flagged.
@@ -32,6 +35,7 @@ MAPPING_METHOD_NONE = "none"
 
 MAPPING_METHODS = (
     MAPPING_METHOD_RECORDED_POINTER,
+    MAPPING_METHOD_MEASUREMENT_ID,
     MAPPING_METHOD_TIMESTAMP,
     MAPPING_METHOD_NONE,
 )
@@ -182,6 +186,7 @@ class ReconstructionResult:
 
 __all__ = [
     "MAPPING_METHODS",
+    "MAPPING_METHOD_MEASUREMENT_ID",
     "MAPPING_METHOD_NONE",
     "MAPPING_METHOD_RECORDED_POINTER",
     "MAPPING_METHOD_TIMESTAMP",

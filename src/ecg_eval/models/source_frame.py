@@ -31,6 +31,8 @@ from typing import Any
 
 import numpy as np
 
+from ._paths import strip_root
+
 # Folder names under data/<date>/raw/<subject>/.
 FOLDER_RAW_ADC = "raw_adc"
 FOLDER_CALIBRATED = "calibrated"
@@ -108,11 +110,7 @@ class SourceFrame:
 
     def relative_files(self, root: str) -> dict[str, str]:
         """File map with ``root`` stripped, for compact provenance output."""
-        prefix = root.rstrip("/\\") + ("/" if root else "")
-        return {
-            key: (value[len(prefix):] if prefix and value.startswith(prefix) else value)
-            for key, value in self.files.items()
-        }
+        return {key: strip_root(value, root) for key, value in self.files.items()}
 
     def summary(self) -> dict[str, Any]:
         return {

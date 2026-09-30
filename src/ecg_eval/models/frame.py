@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from ._paths import strip_root
+
 SOURCE_JSONL = "jsonl"
 SOURCE_RAW_CALIBRATED = "raw_calibrated"
 SOURCE_RAW_MODEL_READY = "raw_model_ready"
@@ -161,7 +163,6 @@ class ECGFrame:
     def provenance_view(self) -> dict[str, Any]:
         """Provenance with the recording root stripped, for compact display."""
         root = self.provenance.get("raw_root", "")
-        prefix = str(root).rstrip("/\\") + ("/" if root else "")
         files = self.provenance.get("source_files") or {}
         return {
             "source_type": self.provenance.get("source_type"),
@@ -169,8 +170,7 @@ class ECGFrame:
             "mapping_method": self.provenance.get("mapping_method"),
             "signal_source": self.provenance.get("signal_source"),
             "source_files": {
-                key: (value[len(prefix):] if prefix and str(value).startswith(prefix) else value)
-                for key, value in files.items()
+                key: strip_root(value, root) for key, value in files.items()
             },
         }
 

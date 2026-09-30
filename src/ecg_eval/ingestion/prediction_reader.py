@@ -92,6 +92,11 @@ def read_predictions(root: Path | str) -> list[SourceFrame]:
             "input_warnings": payload.get("input_warnings"),
             "source_file": payload.get("source_file"),
             "source_sha256": payload.get("source_sha256"),
+            # Normalised to the same shape model_ready uses, so the mapper's
+            # pointer index can read both folders through one lookup.
+            "recorded_source_files": (
+                {"source_file": payload["source_file"]} if payload.get("source_file") else {}
+            ),
         }
         frames.append(record)
 

@@ -20,6 +20,7 @@ from .frame import (
     SOURCE_RAW_RECONSTRUCTED,
 )
 from .reconstruction import (
+    MAPPING_METHOD_MEASUREMENT_ID,
     MAPPING_METHOD_NONE,
     MAPPING_METHOD_RECORDED_POINTER,
     MAPPING_METHOD_TIMESTAMP,
@@ -74,6 +75,7 @@ __all__ = [
     "FrameMapping",
     "FrameResult",
     "FuzzyResult",
+    "MAPPING_METHOD_MEASUREMENT_ID",
     "MAPPING_METHOD_NONE",
     "MAPPING_METHOD_RECORDED_POINTER",
     "MAPPING_METHOD_TIMESTAMP",
