@@ -389,6 +389,28 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.jsonl"))
 
 
+def test_dry_run_still_exposes_the_payload_it_would_write(tmp_path: Path) -> None:
+    """A dry run has no file on disk, so it must still be readable.
+
+    The UI reads the result to offer a download; reading a path that a dry
+    run never created crashed the Reconstruction page.
+    """
+    result = write_jsonl(_frames(2), tmp_path, dry_run=True)
+
+    assert not Path(result.output_path).exists()
+    payload = result.preview_text()
+    assert payload.count(chr(10)) == 2
+    assert json.loads(payload.splitlines()[0])["frame_id"]
+
+
+def test_dry_run_payload_matches_the_written_file(tmp_path: Path) -> None:
+    """Preview and real output must be byte-identical, not two code paths."""
+    dry = write_jsonl(_frames(2), tmp_path / "a", dry_run=True)
+    real = write_jsonl(_frames(2), tmp_path / "b")
+
+    assert dry.payload == Path(real.output_path).read_text(encoding="utf-8")
+
+
 def test_filename_defaults_to_subject_and_session(tmp_path: Path) -> None:
     result = write_jsonl(_frames(1), tmp_path)
 

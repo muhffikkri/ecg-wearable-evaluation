@@ -6,6 +6,7 @@ calculation lives in ``src/ecg_eval/`` (IDEA.md section 64).
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -176,18 +177,22 @@ def sidebar() -> dict[str, Any]:
         configured = config.section("preprocessing")
         configured_on = bool(configured.get("applied", False))
 
-        st.session_state.preprocessing_enabled = st.checkbox(
+        # NOTE: no `key=` here. Assigning the return value to a session_state
+        # entry that is ALSO the widget key raises
+        # StreamlitWidgetAlreadyInstantiatedError, so the widget owns its own
+        # key and the result is stored under a separate name.
+        master_switch = st.checkbox(
             "Execute preprocessing",
             value=configured_on,
-            key="preprocessing_enabled",
             help=(
-                "Master switch. When off, the analysis measures the raw calibrated "
-                "signal as acquired and no filter below is applied."
+                "Master switch. When off, the analysis measures the raw calibrated ",
+                "signal as acquired and no filter below is applied.",
             ),
         )
+        st.session_state.preprocessing_enabled = master_switch
 
         st.session_state.preprocessing_stages = _stage_toggles(
-            configured, st.session_state.preprocessing_enabled
+            configured, master_switch
         )
 
     # Toggling preprocessing changes every SQI value, so a previous run is no

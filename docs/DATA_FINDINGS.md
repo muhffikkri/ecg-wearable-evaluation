@@ -121,3 +121,28 @@ telemetry, `stress_test` frame counter, `network` MQTT latency/RSSI.
 `source_metadata` block (parser statistics, packet-loss counts, SHA-256
 checksums, absolute producer paths) survives only in the reconstructed frame's
 provenance record, never in the JSONL payload.
+
+    ## Generated JSONL schema conformance
+
+`processed/<subject>_<session>.jsonl` reproduces `templates/json-web.jsonl`.
+Verified against the 20 Bryan frames (see git history for the run):
+
+* 20 records, all 2500x3 `float32`, 250 Hz, 10 s, unique frame ids.
+* `ecg.samples` is bit-identical to `calibrated/frame_*_mv.npy`
+  (`np.array_equal` -> True).
+* `prediction` matches the template block exactly: `status`, `label`,
+  `confidence_percent`, `probabilities`, `threshold`, `latency_ms`, `runtime`.
+* `validate_record` reports 0 errors on all 20 records.
+* Top-level key set equals the existing session JSONL exactly.
+
+### Fields the Pi recording never stored
+
+Three template fields are absent, and this is a property of the SOURCE DATA,
+not a gap in the reconstruction. The raw tree was searched: no
+`patient_id`/`patient`/`name`, no `wifi`, no `cpu`, no `mqtt` anywhere in
+`calibrated/`, `filtered/`, `model_ready/` or `predictions/`. Those are web
+dashboard telemetry produced by the MQTT device at upload time, which the
+standalone Pi recording does not have.
+
+They are listed in the manifest under `unavailable_fields` rather than being
+invented or filled with nulls.

@@ -54,7 +54,7 @@ def _mappings_table(mappings: list[Any]) -> pd.DataFrame:
                 "signal_source": m.signal_source,
                 "method": m.method,
                 "sources": ", ".join(
-                    f"{ref.folder}#{ref.frame_number}" for ref in m.sources
+                    f"{folder}#{ref.frame_number}" for folder, ref in m.sources.items()
                 ),
                 "warnings": "; ".join(m.warnings),
                 "reasons": "; ".join(m.reasons),
@@ -235,21 +235,29 @@ def render(ctx: dict[str, Any]) -> None:
                     "to create the file."
                 )
             if write_result.output_path:
-                payload = Path(write_result.output_path).read_text(encoding="utf-8")
+                output_path = Path(write_result.output_path)
+                # In a dry run nothing is on disk yet, so offer the payload
+                # that WAS produced rather than reading a file that does not
+                # exist. Reading it unconditionally crashed the page.
+                if output_path.exists():
+                    payload = output_path.read_text(encoding="utf-8")
+                else:
+                    payload = write_result.preview_text()
                 st.download_button(
                     "Download JSONL",
                     payload,
-                    file_name=Path(write_result.output_path).name,
+                    file_name=output_path.name,
                     mime="application/x-ndjson",
                 )
                 if write_result.manifest_path:
-                    manifest = Path(write_result.manifest_path).read_text(encoding="utf-8")
-                    st.download_button(
-                        "Download manifest",
-                        manifest,
-                        file_name=Path(write_result.manifest_path).name,
-                        mime="application/json",
-                    )
+                    manifest_path = Path(write_result.manifest_path)
+                    if manifest_path.exists():
+                        st.download_button(
+                            "Download manifest",
+                            manifest_path.read_text(encoding="utf-8"),
+                            file_name=manifest_path.name,
+                            mime="application/json",
+                        )
             if write_result.skipped:
                 st.warning("Skipped records:")
                 st.dataframe(

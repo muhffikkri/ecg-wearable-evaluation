@@ -40,6 +40,13 @@ class WriteResult:
     unavailable_fields: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     dry_run: bool = False
+    #: The exact JSONL text that a real run would write. Kept so a dry run can
+    #: still show and offer the payload, which it otherwise has no file to read.
+    payload: str = ""
+
+    def preview_text(self) -> str:
+        """The JSONL content, whether or not it has been written to disk."""
+        return self.payload
 
     @property
     def status(self) -> str:
@@ -188,6 +195,11 @@ def write_jsonl(
 
     result.unavailable_fields = unavailable
     result.written = len(frames) - len(result.skipped)
+    # Build the payload once, so a dry run can show exactly what a real run
+    # would produce and the writer never has two different serialisations.
+    result.payload = "".join(
+        entry.line() + "\n" for entry in built if entry.ok or allow_invalid
+    )
 
     if dry_run:
         return result
@@ -196,10 +208,7 @@ def write_jsonl(
     # Write to a sibling temp file and rename, so an interrupted run cannot leave
     # a half-written dataset that looks complete.
     temporary = target.with_name(target.name + ".partial")
-    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        for entry in built:
-            if entry.ok or allow_invalid:
-                handle.write(entry.line() + "\n")
+    temporary.write_text(result.payload, encoding="utf-8", newline="\n")
     os.replace(temporary, target)
 
     if write_manifest:
