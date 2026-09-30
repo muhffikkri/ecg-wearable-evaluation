@@ -34,7 +34,13 @@ from ecg_eval.models.annotation import (
     Segment,
     SubjectAnnotation,
 )
-from ecg_eval.preprocessing import preprocess
+from ecg_eval.preprocessing import (
+    STAGE_ORDER,
+    default_config,
+    enabled_stages,
+    preprocess,
+    stage_enabled,
+)
 from conftest import requires_real_data
 
 FS = 250.0
@@ -141,22 +147,83 @@ def test_continuous_signal_is_windowed(make_frame):
 # ---------------------------------------------------------------------------
 # Preprocessing
 # ---------------------------------------------------------------------------
-def test_preprocess_not_applied_by_default_returns_original(clean_signal):
-    output = preprocess(clean_signal, FS, {})
-    assert not output.applied
-    assert np.array_equal(output.signal, clean_signal)
+def test_default_config_enables_only_the_three_requested_stages():
+    """wavelet + median baseline + butter bandpass on; nothing else.
+
+    Normalisation is deliberately excluded so amplitudes stay in mV.
+    """
+    config = default_config()
+    assert enabled_stages(config) == ["wavelet", "baseline", "bandpass"]
+    assert not stage_enabled(config, "normalize")
+    assert not stage_enabled(config, "notch")
+    assert not stage_enabled(config, "resample")
+
+
+def test_every_stage_can_be_toggled_independently(clean_signal):
+    """Each stage switches on its own, without dragging the others along."""
+    for stage in STAGE_ORDER:
+        config = {stage: {"enabled": True}}
+        if stage == "resample":
+            config["resample"]["target_fs"] = 125
+        output = preprocess(clean_signal[:, None], FS, config, enabled=True)
+        assert output.enabled_stages == [stage], stage
+        assert output.stages[stage] is True
+        assert all(not v for k, v in output.stages.items() if k != stage)
+
+
+def test_disabled_stage_leaves_the_signal_untouched():
+    """With everything off the signal must come back bit-identical."""
+    signal = np.random.default_rng(0).standard_normal(2500).astype(np.float32) + 9.0
+    output = preprocess(signal[:, None], FS, default_config(), enabled=False)
+    assert output.applied is False
+    assert np.array_equal(output.signal[:, 0], signal)
+    # read-only view: a downstream stage cannot write through to the input
+    assert output.signal.flags.writeable is False
 
 
 def test_preprocess_removes_baseline():
     signal = np.random.default_rng(0).standard_normal(2500) + 9.0
-    output = preprocess(signal, FS, {"remove_baseline": True, "baseline_method": "median"})
+    output = preprocess(signal, FS, {"baseline": {"enabled": True, "kernel_size": 51}}, enabled=True)
     assert output.applied
-    assert abs(float(np.median(output.signal))) < 1e-9
+    assert output.enabled_stages == ["baseline"]
+    assert abs(float(np.median(output.signal[:, 0]))) < 0.5
+    assert output.config["baseline"]["method"] == "median_filter_subtraction"
+
+
+def test_bandpass_and_wavelet_run_together_by_default(clean_signal):
+    """The shipped default chain is the three requested stages, in order."""
+    output = preprocess(clean_signal[:, None], FS, default_config(), enabled=True)
+    assert output.enabled_stages == ["wavelet", "baseline", "bandpass"]
+    assert set(output.config) == {"wavelet", "baseline", "bandpass"}
+    assert output.config["wavelet"]["wavelet"] == "db4"
+    assert output.config["bandpass"]["low_hz"] == 0.5
+    assert output.config["bandpass"]["high_hz"] == 45.0
+
+
+def test_normalisation_is_off_by_default_so_units_stay_mv():
+    """Normalisation must not run unless explicitly switched on.
+
+    Baseline removal deliberately strips DC offset, so the check is on the
+    amplitude scale (std), not the mean.
+    """
+    rng = np.random.default_rng(1)
+    signal = (rng.standard_normal(2500).astype(np.float32) * 3.0 + 40.0)
+    off = preprocess(signal[:, None], FS, default_config(), enabled=True)
+    assert "normalize" not in off.config
+    # amplitudes still physical (mV-ish), not z-scored to unit variance
+    assert 0.5 < float(np.std(off.signal[:, 0])) < 5.0
+
+    on = preprocess(
+        signal[:, None], FS, {**default_config(), "normalize": {"enabled": True}}, enabled=True
+    )
+    assert "normalize" in on.config
+    assert abs(float(np.mean(on.signal[:, 0]))) < 1e-3  # float32 rounding
+    assert float(np.std(on.signal[:, 0])) <= 1.0 + 1e-2
 
 
 def test_preprocess_does_not_modify_input(clean_signal):
     original = clean_signal.copy()
-    preprocess(clean_signal, FS, {"remove_baseline": True})
+    preprocess(clean_signal[:, None], FS, default_config(), enabled=True)
     assert np.array_equal(clean_signal, original)
 
 
@@ -167,27 +234,26 @@ def test_preprocessing_applied_switch_gates_the_whole_chain(config):
     analysis has to state honestly which signal it measured
     (IDEA.md sections 13 and 44).
     """
-    signal = np.random.default_rng(0).standard_normal(2500) + 9.0
+    rng = np.random.default_rng(0)
+    signal = (rng.standard_normal(2500) + 9.0).astype(np.float32)
     section = config.section("preprocessing")
-    assert section["applied"] is False
-    assert section["remove_baseline"] is True  # configured, but gated off
+    assert enabled_stages(section) == ["wavelet", "baseline", "bandpass"]
 
-    off = preprocess(signal, FS, section)
+    off = preprocess(signal[:, None], FS, {**section, "applied": False})
     assert off.applied is False
-    assert np.array_equal(off.signal, signal)
-    assert off.signal is not None and float(np.median(off.signal)) > 1.0  # offset kept
+    assert np.array_equal(off.signal[:, 0], signal)
+    assert float(np.median(off.signal[:, 0])) > 1.0  # offset kept
 
-    on = preprocess(signal, FS, section, enabled=True)
+    on = preprocess(signal[:, None], FS, section, enabled=True)
     assert on.applied is True
-    assert abs(float(np.median(on.signal))) < 1e-9
+    assert on.enabled_stages == ["wavelet", "baseline", "bandpass"]
 
 
 def test_analyzer_records_the_preprocessing_it_actually_ran(config, make_frame, noisy_signal):
-    """Provenance must not claim `applied: false` on a run that removed a baseline."""
+    """Provenance must name the stages that actually ran, and their toggles."""
     section = config.section("preprocessing")
-    assert section["applied"] is False
 
-    off = FrameAnalyzer(config, cache=ResultCache(None, enabled=False))
+    off = FrameAnalyzer(config, cache=ResultCache(None, enabled=False), preprocessing_enabled=False)
     assert off.effective_preprocessing_config == {}
     result_off = off.analyze_frame(make_frame(noisy_signal), SUPINE)
     assert result_off.preprocessing_applied is False
@@ -195,24 +261,42 @@ def test_analyzer_records_the_preprocessing_it_actually_ran(config, make_frame, 
     assert result_off.run_provenance["preprocessing_requested"] == {}
 
     on = FrameAnalyzer(config, cache=ResultCache(None, enabled=False), preprocessing_enabled=True)
-    assert on.effective_preprocessing_config["remove_baseline"] is True
+    assert enabled_stages(on.effective_preprocessing_config) == ["wavelet", "baseline", "bandpass"]
     result_on = on.analyze_frame(make_frame(noisy_signal), SUPINE)
     assert result_on.preprocessing_applied is True
-    assert result_on.run_provenance["preprocessing"]["baseline_method"] == "median"
+    assert set(result_on.run_provenance["preprocessing"]) == {"wavelet", "baseline", "bandpass"}
+    assert result_on.run_provenance["preprocessing_stages"]["normalize"] is False
 
 
 def test_preprocessing_toggle_invalidates_cached_results(config, make_frame, noisy_signal):
-    """The switch is a run-time choice, so it must enter the cache key."""
+    """Both the master switch and each stage toggle must enter the cache key.
+
+    Otherwise flipping one filter would silently reuse SQIs computed on a
+    differently filtered signal.
+    """
     cache = ResultCache(None, enabled=True)
     frame = make_frame(noisy_signal)
 
-    off = FrameAnalyzer(config, cache=cache)
+    off = FrameAnalyzer(config, cache=cache, preprocessing_enabled=False)
     off.analyze_frame(frame, SUPINE)
     off.analyze_frame(frame, SUPINE)
     assert cache.stats() == {"hits": 1, "misses": 0, "entries": 1}
 
     FrameAnalyzer(config, cache=cache, preprocessing_enabled=True).analyze_frame(frame, SUPINE)
     assert cache.stats()["entries"] == 2  # a different signal, so a new entry
+
+    # now vary ONE stage and confirm it also produces a new entry
+    stages = {
+        "applied": True,
+        "wavelet": {"enabled": False, "wavelet": "db4", "level": 4},
+        "baseline": {"enabled": True, "kernel_size": 51},
+        "bandpass": {"enabled": True, "low_hz": 0.5, "high_hz": 45.0, "order": 4},
+        "resample": {"enabled": False},
+        "notch": {"enabled": False},
+        "normalize": {"enabled": False},
+    }
+    FrameAnalyzer(config, cache=cache, preprocessing_stages=stages).analyze_frame(frame, SUPINE)
+    assert cache.stats()["entries"] == 3
 
 
 # ---------------------------------------------------------------------------

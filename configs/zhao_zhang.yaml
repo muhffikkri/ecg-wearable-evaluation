@@ -45,17 +45,42 @@ signal:
   unit: mV
 
 preprocessing:
-  # ADAPTATION: the wearable data already carries a 50 Hz notch from the
-  # device firmware (see model_ready/frame_*_input.json -> source_processing).
-  # The reference pipeline operates on database records without that stage.
-  # Baseline removal is therefore done here, in the analysis layer, and is
-  # reported as an adaptation.
-  remove_baseline: true
-  baseline_method: median          # documented adaptation, not from the paper
-  highpass_hz: null                # not applied; baseline removal covers it
-  lowpass_hz: null                 # not applied
-  notch_hz: null                   # already applied on-device, not re-applied
-  applied: false                   # user must explicitly execute preprocessing
+  # Per-stage toggles. Each stage can be switched on or off independently from
+  # the UI sidebar; only the enabled stages run, and the report states which
+  # filters produced the signal it measured.
+  #
+  # The DSP implementations are ported from the dashboard engine at
+  # templates/preprocessing.py so both applications filter identically.
+  #
+  # Defaults are wavelet + median baseline + butter bandpass. The 50 Hz notch
+  # is NOT re-applied: the device firmware already applied it on-device (see
+  # model_ready/frame_*_input.json -> source_processing). Resampling is off
+  # because the source is already at the 250 Hz analysis rate. Normalisation
+  # is off by request, which keeps amplitudes in mV for pSQI and basSQI.
+  applied: true                    # master switch; the UI can override per run
+  wavelet:
+    enabled: true
+    wavelet: db4
+    level: 4
+  baseline:
+    enabled: true
+    kernel_size: 51
+  bandpass:
+    enabled: true
+    low_hz: 0.5
+    high_hz: 45.0
+    order: 4
+  resample:
+    enabled: false
+    target_fs: null
+  notch:
+    enabled: false
+    frequency_hz: 50.0
+    quality: 30.0
+  normalize:
+    enabled: false
+    clip_min: -5.0
+    clip_max: 5.0
 
 rpeak:
   # Zhao & Zhang use two independent detectors and match their outputs.

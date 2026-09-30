@@ -144,10 +144,13 @@ def render(ctx: dict) -> None:
         if result.preprocessing_applied:
             from ecg_eval.preprocessing import preprocess
 
+            # Re-run the SAME effective chain the analysis used, so the
+            # overlay shows the signal that actually produced the SQIs.
+            stages = ctx.get("preprocessing_stages") or config.section("preprocessing")
             processed = preprocess(
-                frame.lead(str(config.get("signal.analysis_lead", "Lead II"))),
+                frame.lead(str(config.get("signal.analysis_lead", "Lead II")))[:, None],
                 frame.sampling_rate,
-                config.section("preprocessing"),
+                stages,
                 enabled=ctx.get("preprocessing_enabled"),
             ).signal
 

@@ -128,9 +128,10 @@ def render(ctx: dict) -> None:
             if result.preprocessing_applied:
                 from ecg_eval.preprocessing import preprocess
 
+                stages = ctx.get("preprocessing_stages") or config.section("preprocessing")
                 processed = preprocess(
-                    frame.lead(str(config.get("signal.analysis_lead", "Lead II"))),
-                    frame.sampling_rate, config.section("preprocessing"),
+                    frame.lead(str(config.get("signal.analysis_lead", "Lead II")))[:, None],
+                    frame.sampling_rate, stages,
                     enabled=ctx.get("preprocessing_enabled"),
                 ).signal
             lead_order = config.get("signal.channel_order", ["Lead I", "Lead II", "Lead III"])

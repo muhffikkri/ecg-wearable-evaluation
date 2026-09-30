@@ -1,4 +1,4 @@
-﻿"""Per-frame SQI pipeline with deterministic caching.
+"""Per-frame SQI pipeline with deterministic caching.
 
     ECG frame
         -> validation
@@ -138,7 +138,8 @@ class FrameAnalyzer:
         *,
         cache: ResultCache | None = None,
         preprocessing_enabled: bool | None = None,
-    ) -> None:
+        preprocessing_stages: dict[str, Any] | None = None,
+        ) -> None:
         self.config = config
         self.cache = cache or ResultCache(None, enabled=False)
         self.fingerprint = config.scientific_fingerprint()
@@ -147,6 +148,10 @@ class FrameAnalyzer:
         self.analysis_lead = str(config.get("signal.analysis_lead", "Lead II"))
         self.frame_duration = float(config.get("signal.frame_duration_s", 10.0))
         self.preprocessing_enabled = preprocessing_enabled
+        # Per-stage toggle state from the UI. When given it WINS over the
+        # config file, so the filters the user switched on are exactly the
+        # filters the SQI computation runs.
+        self.preprocessing_stages = preprocessing_stages
         self._kwargs_a, self._kwargs_b = _detector_kwargs(config)
 
     # -- configuration views -------------------------------------------
@@ -195,8 +200,23 @@ class FrameAnalyzer:
 
     @property
     def effective_preprocessing_config(self) -> dict[str, Any]:
-        """The chain that will actually run, after the ``applied`` switch."""
-        return resolve_preprocessing(self.preprocessing_config, self.preprocessing_enabled)
+        """The chain that will actually run, after the ``applied`` switch.
+
+        Per-stage toggle state from the UI (``preprocessing_stages``) wins over
+        the config file, so the filters displayed in the sidebar are exactly the
+        filters the SQI computation runs.
+        """
+        if self.preprocessing_stages is not None:
+            chain = {k: v for k, v in self.preprocessing_stages.items()}
+            switch = bool(self.preprocessing_stages.get("applied", True))
+        else:
+            chain = dict(self.preprocessing_config)
+            switch = bool(chain.get("applied", False))
+            if self.preprocessing_enabled is not None:
+                switch = bool(self.preprocessing_enabled)
+        chain["applied"] = switch
+        return resolve_preprocessing(chain, switch)
+
 
     @property
     def is_adaptation(self) -> bool:
@@ -253,7 +273,11 @@ class FrameAnalyzer:
         # The preprocessing switch is a run-time choice rather than a config
         # value, so it is part of the cache key: toggling it must not reuse
         # results computed on the other signal.
-        annotation_key = f"{position}:{frame.internal_id}:pp={self.preprocessing_enabled}"
+        stage_key = json.dumps(
+            {k: v for k, v in sorted(self.effective_preprocessing_config.items()) if k != "applied"},
+            sort_keys=True, default=str,
+        )
+        annotation_key = f"{position}:{frame.internal_id}:pp={stage_key}"
         cache_key = self.cache.key(frame, self.fingerprint, annotation_key)
         cached = self.cache.get(cache_key)
         if cached is not None:
@@ -289,9 +313,12 @@ class FrameAnalyzer:
             return result
 
         # Preprocessing: explicit and recorded, never overwriting the raw view.
+        # The chain passed here is the EFFECTIVE one (UI toggles resolved), so
+        # the filters that run are exactly the ones the sidebar shows.
+        effective_chain = self.effective_preprocessing_config
         processed = preprocess(
-            signal, frame.sampling_rate, self.preprocessing_config,
-            enabled=self.preprocessing_enabled,
+            signal, frame.sampling_rate, effective_chain,
+            enabled=bool(effective_chain),
         )
         result.preprocessing_applied = processed.applied
         result.preprocessing_config = dict(processed.config)
@@ -365,7 +392,10 @@ class FrameAnalyzer:
             "match_tolerance_ms": match.tolerance_ms,
             "analysis_lead": lead_name,
             "preprocessing": dict(processed.config),
-            "preprocessing_requested": self.effective_preprocessing_config,
+                        "preprocessing_requested": self.effective_preprocessing_config,
+                        # full on/off state of every filter, so the report can state which
+                        # stages ran AND which were deliberately skipped
+                        "preprocessing_stages": dict(processed.stages),
             "fuzzy": fuzzy_result.to_dict(),
             "spectral": {
                 "qrs_band_power": spectral.qrs_band_power,
@@ -469,6 +499,7 @@ def run_analysis(
     progress: Callable[[int, int, FrameResult], None] | None = None,
     include_raw: bool = True,
     preprocessing_enabled: bool | None = None,
+    preprocessing_stages: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Analyze every statically-labelled frame in the dataset.
 
@@ -479,7 +510,12 @@ def run_analysis(
     from ..annotation import manager as annotation_manager
 
     annotations = list(annotations)
-    analyzer = FrameAnalyzer(config, cache=cache, preprocessing_enabled=preprocessing_enabled)
+    analyzer = FrameAnalyzer(
+        config,
+        cache=cache,
+        preprocessing_enabled=preprocessing_enabled,
+        preprocessing_stages=preprocessing_stages,
+    )
 
     tasks: list[tuple[ECGFrame, str]] = []
     for (subject, session), frames in dataset.frames_by_session.items():

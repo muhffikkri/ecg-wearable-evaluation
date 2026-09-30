@@ -73,6 +73,42 @@ def init_state() -> None:
             st.session_state[key] = value
 
 
+STAGE_LABELS = {
+    "wavelet": "Wavelet denoising (db4, L4)",
+    "baseline": "Median baseline removal (kernel 51)",
+    "bandpass": "Butter bandpass (0.5-45 Hz, order 4)",
+    "resample": "Polyphase resample",
+    "notch": "Notch 50 Hz",
+    "normalize": "Z-score + clip (normalisation)",
+}
+
+
+def _stage_toggles(config: dict, master_on: bool) -> dict:
+    """Render one toggle per preprocessing stage and return the effective chain.
+
+    The returned dict keeps the master switch AND every stage flag, so it is
+    passed straight to ``preprocess``. When the master switch is off each stage
+    is forced off, so the UI can never display a filter as active while the
+    analysis silently runs on the raw signal.
+    """
+    from ecg_eval.preprocessing import STAGE_ORDER
+
+    effective: dict = {"applied": bool(master_on)}
+    for stage in STAGE_ORDER:
+        spec = config.get(stage)
+        spec = spec if isinstance(spec, dict) else {}
+        default = bool(spec.get("enabled", False))
+        enabled = st.checkbox(
+            STAGE_LABELS.get(stage, stage),
+            value=default and master_on,
+            key=f"pp_stage_{stage}",
+            disabled=not master_on,
+        )
+        effective[stage] = {**spec, "enabled": enabled}
+
+    return effective
+
+
 def sidebar() -> dict[str, Any]:
     """Sidebar: dataset, subject, session and analysis configuration."""
     with st.sidebar:
@@ -132,38 +168,38 @@ def sidebar() -> dict[str, Any]:
 
         st.divider()
         st.markdown("#### Preprocessing")
-        configured_on = bool(config.get("preprocessing.applied", False))
+        st.caption(
+            "Each filter can be switched on or off individually. Stage order and the "
+            "DSP implementations match the ECG dashboard "
+            "(`templates/preprocessing.py`)."
+        )
+        configured = config.section("preprocessing")
+        configured_on = bool(configured.get("applied", False))
+
         st.session_state.preprocessing_enabled = st.checkbox(
             "Execute preprocessing",
             value=configured_on,
             key="preprocessing_enabled",
             help=(
-                "Preprocessing is off by default so the RAW signal is what the analysis "
-                "reports on. Enabling it runs the configured chain (baseline removal) and "
-                "invalidates cached results."
+                "Master switch. When off, the analysis measures the raw calibrated "
+                "signal as acquired and no filter below is applied."
             ),
         )
-        effective = config.section("preprocessing")
-        if st.session_state.preprocessing_enabled:
-            st.caption(
-                "Applied: "
-                + (", ".join(f"{k}={v}" for k, v in effective.items() if v not in (None, False)) or "nothing")
-            )
-        else:
-            st.caption(
-                "Not applied. The analysis signal is the raw, calibrated signal as acquired."
-            )
+
+        st.session_state.preprocessing_stages = _stage_toggles(
+            configured, st.session_state.preprocessing_enabled
+        )
 
     # Toggling preprocessing changes every SQI value, so a previous run is no
-    # longer valid. Drop it here, before the page renders.
+    # longer valid. Drop it here, before the page renders. Any stage change
+    # counts, not just the master switch.
+    stage_state = st.session_state.get("preprocessing_stages", {})
+    current_switch = (st.session_state.preprocessing_enabled, json.dumps(stage_state, sort_keys=True, default=str))
     previous_switch = st.session_state.get("preprocessing_run_switch")
-    if (
-        st.session_state.analysis is not None
-        and previous_switch is not None
-        and previous_switch != st.session_state.preprocessing_enabled
-    ):
-        st.session_state.analysis = None
-    st.session_state.preprocessing_run_switch = st.session_state.preprocessing_enabled
+    if st.session_state.analysis is not None and previous_switch is not None:
+        if previous_switch != current_switch:
+            st.session_state.analysis = None
+    st.session_state.preprocessing_run_switch = current_switch
 
     return {
         "config": config,
@@ -176,6 +212,9 @@ def sidebar() -> dict[str, Any]:
         "cache": cache,
         "summary": summary,
         "preprocessing_enabled": st.session_state.preprocessing_enabled,
+        # effective per-stage chain, including each toggle. Passed to the
+        # analyzer so the SQI computation uses exactly the filters shown here.
+        "preprocessing_stages": st.session_state.get("preprocessing_stages", {}),
     }
 
 
@@ -219,6 +258,7 @@ def run_or_get_analysis(
     analysis = run_analysis(
         dataset, annotations, config, cache=cache, progress=on_progress,
         preprocessing_enabled=st.session_state.preprocessing_enabled,
+        preprocessing_stages=st.session_state.get("preprocessing_stages") or None,
     )
     cache.flush()
     progress_bar.empty()
