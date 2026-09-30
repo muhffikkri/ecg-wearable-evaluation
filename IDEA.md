@@ -250,93 +250,46 @@ One model-ready frame is represented by two files.
 
 ---
 
-# 7. Data Conversion Requirement
+# 7. Frame Reconstruction Requirement
 
-Implement a dedicated conversion subsystem.
+> SUPERSEDED. IDEA-REVISED.md replaced this section. The two-way conversion
+> design described previously has been removed from the codebase; see
+> src/ecg_eval/reconstruction/ and src/ecg_eval/jsonl/.
 
-The application must support conversion in both directions at the structural level:
+Assemble canonical frames from a raw Raspberry Pi recording. The recorded
+folders are **not** two representations of one recording to be converted back
+and forth; they are complementary evidence about the same frames:
 
-```text
-calibrated
-    ↕
-model_ready
-```
+`	ext
+calibrated/   processed mV signal + calibration metadata
+filtered/     baseline-corrected signal
+model_ready/  the device's own analysis input + its verdict
+predictions/  the device's model output
+`
 
-However, the conversion must distinguish between:
+The application must rebuild each canonical frame from that evidence and state
+how it did so.
 
-### Lossless fields
+# 8. Reconstruction Design
 
-Fields that can be copied or deterministically transformed without information loss.
+> SUPERSEDED. IDEA-REVISED.md section 8 replaces this section. The converter
+> module and its two-way operations have been deleted.
 
-### Derived fields
+The reconstructor must:
 
-Fields generated from another representation.
+1. discover frames per folder without assuming the folders agree in count
+2. link calibrated to iltered by the recorded measurement_id
+3. link model_ready to iltered by the recorded source_file pointer
+4. link predictions to model_ready by the recorded source_file pointer
+5. classify every frame as VERIFIED, WARNING, UNRESOLVED or ERROR
+6. never pair frames on frame numbering alone
 
-### Irrecoverable fields
+An UNRESOLVED frame is reported, never guessed. Matching on a shared frame
+number would produce a dataset that looks complete and is silently misaligned.
 
-Information that exists in calibrated data but does not exist in model_ready data cannot be reconstructed magically.
-
-For example:
-
-```text
-calibrated:
-    CSV
-    JSON
-    NPY
-
-model_ready:
-    JSON
-    NPY
-```
-
-If the calibrated CSV contains information not stored in model_ready JSON/NPY, reverse conversion may generate a valid CSV from the NPY but cannot guarantee that it is byte-for-byte identical to the original CSV.
-
-Therefore:
-
-> "Round-trip" means semantic/structural round-trip, not necessarily byte-identical round-trip.
-
----
-
-# 8. Conversion Design
-
-Create a conversion module with explicit operations:
-
-```text
-calibrated → model_ready
-model_ready → calibrated
-```
-
-The converter must:
-
-1. discover frame IDs
-2. pair related files
-3. validate matching frame numbers
-4. validate NPY shape
-5. validate JSON metadata
-6. preserve provenance
-7. report missing files
-8. avoid overwriting source data by default
-9. support dry-run mode
-10. generate a conversion manifest
-
-Example:
-
-```text
-frame_000020_mv.csv
-frame_000020_mv.json
-frame_000020_mv.npy
-
-        ↓
-
-frame_000020_input.json
-frame_000020_input.npy
-```
-
-Frame numbering must be preserved whenever possible.
-
-Do NOT silently rename frame numbers unless a mapping is explicitly recorded.
-
----
+The generated dataset is never written into the recording tree. Output goes to
+processed/ or is offered as a download, and the writer refuses an output path
+inside the source directory.
 
 # 9. Canonical Internal Representation
 
@@ -429,37 +382,16 @@ The UI should display this inventory before analysis.
 
 The application should have at least these major tabs/pages:
 
-```text
+`	ext
 1. Dataset
 2. Annotation
 3. Analysis
 4. Interpretation
-5. Data Conversion
-```
+5. Reconstruction
+`
 
-The user workflow should be:
-
-```text
-Dataset
-   ↓
-inspect recordings
-   ↓
-Annotation
-   ↓
-assign body-position labels
-   ↓
-Analysis
-   ↓
-calculate SQIs
-   ↓
-fuzzy evaluation
-   ↓
-Interpretation
-```
-
-Data conversion should be accessible independently because it is a preprocessing/maintenance operation.
-
----
+> IDEA-REVISED.md section 10 replaces the fifth tab: Data Conversion became
+> Reconstruction.
 
 # 12. Dataset Tab
 
@@ -2413,19 +2345,24 @@ The agent must first determine:
 
 ---
 
-# 61. Data Conversion Safety
+# 61. Output Safety
+
+> Renamed from "Data Conversion Safety". The requirement is unchanged; the
+> reconstruction pipeline is what has to satisfy it now.
 
 The raw source must remain untouched.
 
-Never perform in-place conversion inside:
+Never write generated output inside:
 
 ```text
 data/
 ```
 
-unless explicitly requested.
+The writer enforces this rather than trusting callers: it refuses an output path
+that resolves inside the source root, and it writes via a temporary file and an
+atomic rename so an interrupted run cannot leave a dataset that looks complete.
 
-Generated conversion output should be placed in:
+Generated output should be placed in:
 
 ```text
 processed/
