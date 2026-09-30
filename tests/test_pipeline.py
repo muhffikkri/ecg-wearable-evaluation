@@ -263,12 +263,62 @@ def test_invalid_frame_is_marked_not_crashed(config, make_frame):
 
 def test_method_label_distinguishes_reproduction_from_adaptation(config, make_frame, clean_signal):
     reproduction = FrameAnalyzer(load_config("zhao_zhang"), cache=ResultCache(None, enabled=False))
-    assert reproduction.method_label() == "Zhao-Zhang reproduction"
-    assert reproduction.is_reproduction
+    assert reproduction.method_label == "Zhao-Zhang structured reproduction (not verified)"
+    assert not reproduction.is_adaptation
 
     adapted = FrameAnalyzer(load_config("pan_tompkins_adapted"), cache=ResultCache(None, enabled=False))
-    assert adapted.method_label() == "Pan-Tompkins adaptation"
-    assert not adapted.is_reproduction
+    assert adapted.method_label == "Pan-Tompkins adaptation"
+    assert adapted.is_adaptation
+
+
+def test_the_reference_pairing_alone_does_not_earn_a_reproduction_claim(config):
+    """Every reference parameter is still pending_verification.
+
+    Using the reference detector pairing is not grounds for calling a run a
+    reproduction. configs/zhao_zhang.yaml declares is_strict_reproduction: false
+    and marks all 37 of its scientific parameters as unverified, so the label has
+    to say so rather than reading "reproduction" off the detector name.
+    """
+    analyzer = FrameAnalyzer(load_config("zhao_zhang"), cache=ResultCache(None, enabled=False))
+
+    assert not analyzer.is_adaptation
+    assert analyzer.pending_parameters
+    assert not analyzer.config.is_strict_reproduction
+    assert not analyzer.is_verified_reproduction
+    assert "not verified" in analyzer.method_label
+    assert "pending_verification" in analyzer.verification_note
+
+
+def test_a_fully_verified_config_earns_the_reproduction_claim(tmp_path, make_frame, clean_signal):
+    """The reproduction label is reachable, once the parameters are confirmed."""
+    path = tmp_path / "configs"
+    path.mkdir()
+    (path / "verified.yaml").write_text(
+        """
+meta:
+  is_strict_reproduction: true
+rpeak:
+  primary_detector_b: zhao_wavelet
+q_sqi:
+  match_tolerance_ms:
+    value: 150.0
+    source: zhao_zhang_2018
+""",
+        encoding="utf-8",
+    )
+    analyzer = FrameAnalyzer(load_config("verified", path), cache=ResultCache(None, enabled=False))
+
+    assert analyzer.pending_parameters == []
+    assert analyzer.is_verified_reproduction
+    assert analyzer.method_label == "Zhao-Zhang verified reproduction"
+    assert "verified" in analyzer.verification_note.lower()
+
+
+def test_the_adaptation_note_names_the_substituted_detector(config):
+    adapted = FrameAnalyzer(load_config("pan_tompkins_adapted"), cache=ResultCache(None, enabled=False))
+
+    assert "Pan-Tompkins" in adapted.verification_note
+    assert "not comparable" in adapted.verification_note
 
 
 def test_cache_reuses_result(tmp_path, config, make_frame, clean_signal):
