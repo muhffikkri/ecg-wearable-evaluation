@@ -1,0 +1,8 @@
+streamlit>=1.36
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+PyWavelets>=1.5
+plotly>=5.20
+PyYAML>=6.0
+pytest>=8.0

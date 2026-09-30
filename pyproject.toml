@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecg-wearable-evaluation"
+version = "0.1.0"
+description = "Local Streamlit application for evaluating ECGRHYTHMIA wearable ECG signal quality across supine/sitting/standing positions using the Zhao & Zhang (2018) SQI methodology."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.36",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "PyWavelets>=1.5",
+    "plotly>=5.20",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
