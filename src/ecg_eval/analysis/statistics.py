@@ -1,4 +1,4 @@
-"""Descriptive statistics helpers.
+﻿"""Descriptive statistics helpers.
 
 Deliberately explicit about NaN handling: frames with an invalid result stay
 in the frame-level table but are excluded from aggregates, and the exclusion
@@ -43,13 +43,25 @@ def describe(values: Sequence[float]) -> dict[str, float]:
     }
 
 
+CLASS_LEVELS = ("Excellent", "Barely Acceptable", "Unacceptable")
+
+
 def class_distribution(classes: Sequence[str]) -> dict[str, float]:
-    """Percentage of frames in each quality class."""
+    """Percentage of frames in each quality class.
+
+    All three classes are always present. A class with no frames is reported as
+    0.0% rather than omitted, because an absent key reads as "not measured"
+    where the honest answer is "none occurred" -- a reader would otherwise see
+    "n/a Barely Acceptable" for a class that simply had no members.
+    """
     total = len(classes)
-    counts: dict[str, int] = {}
+    counts: dict[str, int] = {level: 0 for level in CLASS_LEVELS}
     for value in classes:
         counts[value] = counts.get(value, 0) + 1
-    return {name: (100.0 * count / total if total else math.nan) for name, count in counts.items()}
+    return {
+        name: (100.0 * count / total if total else math.nan)
+        for name, count in counts.items()
+    }
 
 
 def results_to_frame(results: Sequence[Any]) -> pd.DataFrame:
@@ -142,6 +154,7 @@ def overall_summary(df: pd.DataFrame) -> dict[str, Any]:
 
 __all__ = [
     "CLASS_COLUMNS",
+    "CLASS_LEVELS",
     "SQI_COLUMNS",
     "aggregate_by",
     "class_distribution",
