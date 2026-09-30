@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,13 +12,16 @@ import pytest
 from ecg_eval.ingestion import (
     annotation_coverage,
     build_inventory,
+    declared_session_id,
     ingest,
     read_jsonl_file,
+    recorded_session_id,
     validate_frames,
     validate_sampling_rates,
 )
+from ecg_eval.jsonl import write_jsonl
 from ecg_eval.models.annotation import SUPINE, Segment, SubjectAnnotation
-from conftest import requires_real_data
+from conftest import build_test_recording, requires_real_data
 
 
 def test_reads_valid_frames(jsonl_file):
@@ -159,3 +164,120 @@ def test_ingest_real_dataset():
     # The raw MQTT-mistake recording is picked up as well.
     assert "raw_calibrated" in formats
     assert dataset.sampling_rates() == [250.0]
+
+
+# -- generated datasets inside data/ -------------------------------------
+
+
+def _recording_with_generated_copy(tmp_path):
+    """A raw recording plus the dataset generated from it, both under data/.
+
+    This is the shape that caused a silent double count: the generated file sits
+    next to the recording, so ``rglob`` finds it, and the JSONL reader derives a
+    different identity from its filename than the raw reader does from the
+    folder. Both describe the same 20 frames.
+    """
+    from ecg_eval.reconstruction import reconstruct_directory
+
+    root = build_test_recording(tmp_path, frames=2)
+    frames = reconstruct_directory(root, subject_id="S01").frames
+    write_jsonl(frames, root.parent, filename="S01_copy.jsonl")
+    assert (root.parent / "S01_copy.jsonl").is_file()
+    return root, root.parent / "S01_copy.jsonl"
+
+
+def test_a_generated_copy_inside_data_is_not_counted_twice(tmp_path: Path) -> None:
+    root, generated = _recording_with_generated_copy(tmp_path)
+
+    dataset = ingest(tmp_path / "data")
+
+    derived = dataset.derived_datasets
+    assert len(derived) == 1, derived
+    assert generated.name in derived[0]
+    # One session of 2 frames, not two sessions of 2.
+    assert len(dataset.sessions()) == 1
+    assert dataset.n_frames == 2
+    assert dataset.sessions()[0][0] == "S01"
+
+
+def test_skipping_a_derived_copy_is_explained(tmp_path: Path) -> None:
+    _recording_with_generated_copy(tmp_path)
+
+    dataset = ingest(tmp_path / "data")
+
+    reasons = [w for w in dataset.warnings if "skipped" in w]
+    assert len(reasons) == 1, dataset.warnings
+    assert "already ingested" in reasons[0]
+    assert "session_test_000000" in reasons[0]
+
+
+def test_the_generated_copy_is_read_when_raw_is_excluded(tmp_path: Path) -> None:
+    _recording_with_generated_copy(tmp_path)
+
+    dataset = ingest(tmp_path / "data", include_raw=False)
+
+    assert dataset.derived_datasets == []
+    assert len(dataset.sessions()) == 1
+    assert dataset.sessions()[0][0] == "session_test_000000"
+    assert dataset.n_frames == 2
+
+
+def test_an_unrelated_dataset_is_still_ingested(tmp_path: Path) -> None:
+    """Only sessions the raw tree actually provides are skipped.
+
+    The copy declares a different session, so it is a genuine separate dataset
+    and must be read even though it sits in the same folder.
+    """
+    root, generated = _recording_with_generated_copy(tmp_path)
+
+    unrelated = root.parent / "ses000000000099.jsonl"
+    records = [
+        json.loads(line) for line in generated.read_text(encoding="utf-8").splitlines()
+    ]
+    for record in records:
+        record["session_id"] = "ses000000000099"
+        record["message_id"] = record["message_id"].replace(
+            "session_test_000000", "ses000000000099"
+        )
+    unrelated.write_text(
+        "\n".join(json.dumps(r, separators=(",", ":")) for r in records) + "\n",
+        encoding="utf-8",
+    )
+
+    dataset = ingest(tmp_path / "data")
+
+    assert dataset.derived_datasets, "the derived copy should still be skipped"
+    assert ("ses000000000099", "ses000000000099") in dataset.frames_by_session
+    assert len(dataset.sessions()) == 2
+    assert dataset.n_frames == 4
+
+
+def test_recorded_session_id_reads_the_session_file(tmp_path: Path) -> None:
+    root = tmp_path / "session.json"
+    root.write_text(json.dumps({"session_id": "session_abc"}), encoding="utf-8")
+
+    assert recorded_session_id(tmp_path) == "session_abc"
+    assert recorded_session_id(tmp_path / "missing") is None
+
+
+def test_recorded_session_id_tolerates_a_broken_session_file(tmp_path: Path) -> None:
+    (tmp_path / "session.json").write_text("{not json", encoding="utf-8")
+
+    assert recorded_session_id(tmp_path) is None
+
+
+def test_declared_session_id_peeks_the_first_record(tmp_path: Path) -> None:
+    from ecg_eval.reconstruction import reconstruct_directory
+
+    root = build_test_recording(tmp_path, frames=1)
+    frames = reconstruct_directory(root, subject_id="S01").frames
+    written = write_jsonl(frames, tmp_path / "out", filename="peek.jsonl")
+
+    assert declared_session_id(Path(written.output_path)) == "session_test_000000"
+
+
+def test_declared_session_id_on_an_empty_file(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("\n\n", encoding="utf-8")
+
+    assert declared_session_id(empty) is None

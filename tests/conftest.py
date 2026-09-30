@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -138,3 +139,101 @@ def jsonl_file(tmp_path: Path) -> Path:
     lines.insert(1, "{not valid json")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def build_test_recording(tmp_path: Path, *, frames: int = 2) -> Path:
+    """Build a minimal recording laid out like a real Raspberry Pi session.
+
+    Shared by the CLI tests and the ingestion tests: the derived-copy check
+    needs the same recording shape the converter is pointed at.
+    """
+    root = tmp_path / "data" / "29-09-2026" / "S01"
+    root.mkdir(parents=True)
+    session_id = "session_test_000000"
+    (root / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "started_at": "2026-09-28T20:26:45+07:00",
+                "ended_at": "2026-09-28T20:26:55+07:00",
+                "sampling_rate_hz": 250,
+                "duration_per_frame_s": 1.0,
+                "frame_count": frames,
+                "channel_order": ["Lead I", "Lead II", "Lead III"],
+                "unit": "mV",
+                "status": "STOPPED",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rng = np.random.default_rng(7)
+    for folder, suffix in (("calibrated", "_mv"), ("filtered", "_mv")):
+        (root / folder).mkdir(parents=True, exist_ok=True)
+    (root / "model_ready").mkdir(parents=True, exist_ok=True)
+    (root / "predictions").mkdir(parents=True, exist_ok=True)
+
+    for index in range(1, frames + 1):
+        name = f"frame_{index:06d}"
+        measurement_id = str(uuid.uuid4())
+        signal = rng.normal(0, 0.1, size=(250, 3)).astype(np.float32)
+
+        shared = {
+            "source_frame": name,
+            "dtype": "float32",
+            "shape": [250, 3],
+            "sample_count": 250,
+            "sample_rate_hz": 250,
+            "duration_seconds": 1.0,
+            "unit": "mV",
+            "channel_order": ["Lead I", "Lead II", "Lead III"],
+            "created_at_utc": f"2026-09-28T13:27:0{index}.000000Z",
+            "source_metadata": {"measurement_id": measurement_id, "device_id": "device01"},
+        }
+        np.save(root / "calibrated" / f"{name}{suffix}.npy", signal)
+        (root / "calibrated" / f"{name}{suffix}.json").write_text(
+            json.dumps(shared), encoding="utf-8"
+        )
+        np.save(root / "filtered" / f"{name}{suffix}.npy", signal)
+        (root / "filtered" / f"{name}{suffix}.json").write_text(
+            json.dumps({**shared, "source_metadata": {**shared["source_metadata"], "measurement_id": measurement_id}}),
+            encoding="utf-8",
+        )
+
+        np.save(root / "model_ready" / f"{name}_input.npy", signal)
+        (root / "model_ready" / f"{name}_input.json").write_text(
+            json.dumps(
+                {
+                    "frame_id": name,
+                    "channel_order": ["Lead I", "Lead II", "Lead III"],
+                    "sample_rate_hz": 250,
+                    "samples_per_channel": 250,
+                    "shape": [250, 3],
+                    "dtype": "float32",
+                    "unit": "mV",
+                    "source_file": f"/device/{session_id}/filtered/{name}_mv.npy",
+                    "validation": {"status": "PASS", "warnings": []},
+                    "signal_quality": {"status": "PASS", "reasons": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "predictions" / f"{name}_prediction.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "status": "PASS",
+                    "frame_id": f"{index:06d}",
+                    "source_file": f"/device/{session_id}/model_ready/{name}_input.npy",
+                    "prediction": "Normal",
+                    "confidence_percent": 99.7,
+                    "probabilities": {"Normal": 99.7, "AF": 0.1},
+                    "threshold": 0.5,
+                    "latency_ms": 250.0,
+                    "runtime": "ai-edge-litert",
+                }
+            ),
+            encoding="utf-8",
+        )
+    return root

@@ -148,6 +148,14 @@ def sidebar() -> dict[str, Any]:
         st.metric("Frames", summary["frames"])
         if summary["malformed"]:
             st.warning(f"{summary['malformed']} malformed record(s)")
+        if summary.get("derived_datasets"):
+            # A dataset generated from a recording already in the tree would
+            # otherwise count the same frames twice, so it is skipped. Say so
+            # rather than letting the count look unexplained.
+            st.info(
+                f"{len(summary['derived_datasets'])} generated dataset(s) skipped: "
+                "already ingested from their raw recordings."
+            )
 
         st.divider()
         st.markdown("#### Method")

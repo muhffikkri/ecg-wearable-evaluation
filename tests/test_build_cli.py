@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import build_test_recording
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "build_jsonl_dataset.py"
 DATA = REPO_ROOT / "data"
@@ -23,102 +25,6 @@ RECORDING = DATA / "29-09-2026" / "Bryan"
 EXIT_OK = 0
 EXIT_INVALID = 1
 EXIT_USAGE = 2
-
-
-def _recording(tmp_path: Path, *, frames: int = 2) -> Path:
-    """A minimal recording laid out like a real Raspberry Pi session."""
-    import uuid
-
-    root = tmp_path / "data" / "29-09-2026" / "S01"
-    root.mkdir(parents=True)
-    session_id = "session_test_000000"
-    (root / "session.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "session_id": session_id,
-                "started_at": "2026-09-28T20:26:45+07:00",
-                "ended_at": "2026-09-28T20:26:55+07:00",
-                "sampling_rate_hz": 250,
-                "duration_per_frame_s": 1.0,
-                "frame_count": frames,
-                "channel_order": ["Lead I", "Lead II", "Lead III"],
-                "unit": "mV",
-                "status": "STOPPED",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    rng = np.random.default_rng(7)
-    for folder, suffix in (("calibrated", "_mv"), ("filtered", "_mv")):
-        (root / folder).mkdir(parents=True, exist_ok=True)
-    (root / "model_ready").mkdir(parents=True, exist_ok=True)
-    (root / "predictions").mkdir(parents=True, exist_ok=True)
-
-    for index in range(1, frames + 1):
-        name = f"frame_{index:06d}"
-        measurement_id = str(uuid.uuid4())
-        signal = rng.normal(0, 0.1, size=(250, 3)).astype(np.float32)
-
-        shared = {
-            "source_frame": name,
-            "dtype": "float32",
-            "shape": [250, 3],
-            "sample_count": 250,
-            "sample_rate_hz": 250,
-            "duration_seconds": 1.0,
-            "unit": "mV",
-            "channel_order": ["Lead I", "Lead II", "Lead III"],
-            "created_at_utc": f"2026-09-28T13:27:0{index}.000000Z",
-            "source_metadata": {"measurement_id": measurement_id, "device_id": "device01"},
-        }
-        np.save(root / "calibrated" / f"{name}{suffix}.npy", signal)
-        (root / "calibrated" / f"{name}{suffix}.json").write_text(
-            json.dumps(shared), encoding="utf-8"
-        )
-        np.save(root / "filtered" / f"{name}{suffix}.npy", signal)
-        (root / "filtered" / f"{name}{suffix}.json").write_text(
-            json.dumps({**shared, "source_metadata": {**shared["source_metadata"], "measurement_id": measurement_id}}),
-            encoding="utf-8",
-        )
-
-        np.save(root / "model_ready" / f"{name}_input.npy", signal)
-        (root / "model_ready" / f"{name}_input.json").write_text(
-            json.dumps(
-                {
-                    "frame_id": name,
-                    "channel_order": ["Lead I", "Lead II", "Lead III"],
-                    "sample_rate_hz": 250,
-                    "samples_per_channel": 250,
-                    "shape": [250, 3],
-                    "dtype": "float32",
-                    "unit": "mV",
-                    "source_file": f"/device/{session_id}/filtered/{name}_mv.npy",
-                    "validation": {"status": "PASS", "warnings": []},
-                    "signal_quality": {"status": "PASS", "reasons": []},
-                }
-            ),
-            encoding="utf-8",
-        )
-        (root / "predictions" / f"{name}_prediction.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "status": "PASS",
-                    "frame_id": f"{index:06d}",
-                    "source_file": f"/device/{session_id}/model_ready/{name}_input.npy",
-                    "prediction": "Normal",
-                    "confidence_percent": 99.7,
-                    "probabilities": {"Normal": 99.7, "AF": 0.1},
-                    "threshold": 0.5,
-                    "latency_ms": 250.0,
-                    "runtime": "ai-edge-litert",
-                }
-            ),
-            encoding="utf-8",
-        )
-    return root
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -160,8 +66,8 @@ def test_a_directory_with_no_recordings_is_a_usage_error(tmp_path: Path) -> None
 
 
 def test_filename_cannot_be_shared_between_recordings(tmp_path: Path) -> None:
-    first = _recording(tmp_path / "a")
-    second = _recording(tmp_path / "b", frames=1)
+    first = build_test_recording(tmp_path / "a")
+    second = build_test_recording(tmp_path / "b", frames=1)
 
     result = run(str(first), str(second), "--output", str(tmp_path / "out"), "--filename", "x.jsonl")
 
@@ -173,7 +79,7 @@ def test_filename_cannot_be_shared_between_recordings(tmp_path: Path) -> None:
 
 
 def test_writing_into_the_recording_is_refused(tmp_path: Path) -> None:
-    root = _recording(tmp_path)
+    root = build_test_recording(tmp_path)
 
     result = run(str(root), "--output", str(root / "converted.jsonl"))
 
@@ -183,7 +89,7 @@ def test_writing_into_the_recording_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_recording_is_never_modified(tmp_path: Path) -> None:
-    root = _recording(tmp_path)
+    root = build_test_recording(tmp_path)
     before = {
         path: path.stat().st_mtime_ns
         for path in sorted(root.rglob("*"))
@@ -205,7 +111,7 @@ def test_the_recording_is_never_modified(tmp_path: Path) -> None:
 
 
 def test_dry_run_writes_nothing(tmp_path: Path) -> None:
-    root = _recording(tmp_path)
+    root = build_test_recording(tmp_path)
     out = tmp_path / "out"
 
     result = run(str(root), "--output", str(out), "--dry-run")
@@ -216,7 +122,7 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_conversion_writes_records_and_a_manifest(tmp_path: Path) -> None:
-    root = _recording(tmp_path, frames=3)
+    root = build_test_recording(tmp_path, frames=3)
     out = tmp_path / "out"
 
     result = run(str(root), "--output", str(out), "--json")
@@ -243,7 +149,7 @@ def test_conversion_writes_records_and_a_manifest(tmp_path: Path) -> None:
 
 
 def test_the_signal_survives_the_round_trip(tmp_path: Path) -> None:
-    root = _recording(tmp_path, frames=2)
+    root = build_test_recording(tmp_path, frames=2)
     out = tmp_path / "out"
 
     result = run(str(root), "--output", str(out))
@@ -259,7 +165,7 @@ def test_the_signal_survives_the_round_trip(tmp_path: Path) -> None:
 
 
 def test_the_subject_id_can_be_overridden(tmp_path: Path) -> None:
-    root = _recording(tmp_path, frames=1)
+    root = build_test_recording(tmp_path, frames=1)
     out = tmp_path / "out"
 
     result = run(str(root), "--output", str(out), "--subject-id", "PAT-042")
@@ -273,7 +179,7 @@ def test_the_subject_id_can_be_overridden(tmp_path: Path) -> None:
 
 
 def test_a_date_folder_discovers_its_recordings(tmp_path: Path) -> None:
-    root = _recording(tmp_path)
+    root = build_test_recording(tmp_path)
     out = tmp_path / "out"
 
     result = run(str(root.parent), "--output", str(out), "--json")
@@ -288,7 +194,7 @@ def test_the_output_can_be_read_back_by_the_ingestion_reader(tmp_path: Path) -> 
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from ecg_eval.ingestion.jsonl_reader import read_jsonl_file
 
-    root = _recording(tmp_path, frames=2)
+    root = build_test_recording(tmp_path, frames=2)
     out = tmp_path / "out"
     result = run(str(root), "--output", str(out))
     assert result.returncode == EXIT_OK, result.stderr

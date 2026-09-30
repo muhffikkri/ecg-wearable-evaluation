@@ -82,6 +82,15 @@ Exit codes: `0` success, `1` validation failed, `2` unusable arguments. Pointing
 Each run writes a `.jsonl` dataset plus a `.manifest.json` recording where every
 field came from and which fields the recording simply does not have.
 
+### Generated datasets kept inside `data/`
+
+A generated dataset may sit next to the recording it came from. `ingest()` reads
+the raw tree first and then skips any JSONL file whose `session_id` the raw tree
+already supplied, so those frames are not counted twice under a second identity.
+The skip is reported in `dataset.warnings`, in `dataset.derived_datasets`, and in
+the sidebar — it is never silent. Pass `include_raw=False` to read the generated
+datasets instead of the recordings.
+
 ## Scientific status
 
 This is **not** a verified reproduction, and the application says so on every

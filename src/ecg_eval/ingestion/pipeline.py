@@ -29,6 +29,8 @@ class Dataset:
     inventory: DatasetInventory | None = None
     subject_manifest: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    #: JSONL files skipped because a raw recording already supplies that session.
+    derived_datasets: list[str] = field(default_factory=list)
 
     # -- access ---------------------------------------------------------
     def all_frames(self) -> list[ECGFrame]:
@@ -89,6 +91,45 @@ def load_subject_manifest(path: Path | None) -> dict[str, str]:
     return {}
 
 
+def recorded_session_id(root: Path) -> str | None:
+    """The session id a recording actually declares, from ``session.json``.
+
+    The raw reader labels frames with a folder-derived id such as ``raw_Bryan``,
+    which is fine for grouping but useless for recognising that a generated
+    dataset came from this recording. The recorded id is what a published record
+    carries, so that is what the derived-output check compares.
+    """
+    path = Path(root) / "session.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("session.json unreadable in %s: %s", root, exc)
+        return None
+    value = payload.get("session_id") if isinstance(payload, dict) else None
+    return str(value) if value else None
+
+
+def declared_session_id(path: Path) -> str | None:
+    """Read just the first record's ``session_id`` from a JSONL file.
+
+    Cheap enough to run before deciding whether the file is worth reading at
+    all, and it answers the only question the derived-output check needs.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                value = json.loads(line).get("session_id")
+                return str(value) if value else None
+    except (OSError, ValueError, AttributeError) as exc:  # noqa: PERF203
+        logger.warning("cannot peek session_id from %s: %s", path, exc)
+    return None
+
+
 def ingest(
     data_dir: Path | str | None = None,
     config: Config | None = None,
@@ -115,22 +156,10 @@ def ingest(
     dataset = Dataset(subject_manifest=manifest)
     malformed: list[MalformedRecord] = []
 
-    for path in iter_jsonl_files(data_dir):
-        date_folder = path.parent.name if path.parent != data_dir else ""
-        result = read_jsonl_file(path, date_folder=date_folder, subject_manifest=manifest)
-        malformed.extend(result.malformed)
-        for issue in result.warnings:
-            dataset.warnings.append(f"{path.name}: {issue}")
-        if not result.frames:
-            dataset.warnings.append(f"{path.relative_to(data_dir)}: no frames ingested")
-            continue
-        key = (result.frames[0].subject_id, result.frames[0].session_id)
-        dataset.frames_by_session.setdefault(key, []).extend(result.frames)
-        logger.info(
-            "ingested %s: %d frames (%d malformed, status %s)",
-            path.name, len(result.frames), len(result.malformed), result.status,
-        )
-
+    # The raw tree is read first so a generated dataset can be recognised as a
+    # copy of a recording that is already present. Reading JSONL first would mean
+    # deciding before knowing what the raw tree holds.
+    raw_session_ids: set[str] = set()
     if include_raw:
         for root in discover_raw_roots(data_dir):
             date_folder = root.parent.name
@@ -149,7 +178,43 @@ def ingest(
                 continue
             key = (result.frames[0].subject_id, result.frames[0].session_id)
             dataset.frames_by_session.setdefault(key, []).extend(result.frames)
+            # Track both the folder-derived id and the one the recording
+            # declares, so a generated copy is recognised under either.
+            raw_session_ids.add(result.frames[0].session_id)
+            recorded = recorded_session_id(root)
+            if recorded:
+                raw_session_ids.add(recorded)
             logger.info("ingested raw %s: %d frames", root.name, len(result.frames))
+
+    for path in iter_jsonl_files(data_dir):
+        # A dataset generated from a recording that was just ingested would add
+        # the same frames a second time under a different identity, because the
+        # reader derives the subject from the filename. Skip it and say so.
+        session_id = declared_session_id(path)
+        if session_id and session_id in raw_session_ids:
+            name = path.relative_to(data_dir)
+            dataset.derived_datasets.append(str(name))
+            message = (
+                f"{name}: skipped, session {session_id} is already ingested "
+                f"from its raw recording"
+            )
+            dataset.warnings.append(message)
+            logger.info("%s", message)
+            continue
+        date_folder = path.parent.name if path.parent != data_dir else ""
+        result = read_jsonl_file(path, date_folder=date_folder, subject_manifest=manifest)
+        malformed.extend(result.malformed)
+        for issue in result.warnings:
+            dataset.warnings.append(f"{path.name}: {issue}")
+        if not result.frames:
+            dataset.warnings.append(f"{path.relative_to(data_dir)}: no frames ingested")
+            continue
+        key = (result.frames[0].subject_id, result.frames[0].session_id)
+        dataset.frames_by_session.setdefault(key, []).extend(result.frames)
+        logger.info(
+            "ingested %s: %d frames (%d malformed, status %s)",
+            path.name, len(result.frames), len(result.malformed), result.status,
+        )
 
     dataset.inventory = build_inventory(
         dataset.frames_by_session,
@@ -181,6 +246,7 @@ def dataset_summary(dataset: Dataset) -> dict[str, Any]:
         "statuses": sorted({s.status for s in inv.sessions}) if inv else [],
         "malformed": inv.malformed_count if inv else 0,
         "coverage": inv.coverage() if inv else {},
+        "derived_datasets": list(dataset.derived_datasets),
     }
 
 
@@ -188,6 +254,8 @@ __all__ = [
     "Dataset",
     "annotation_coverage",
     "dataset_summary",
+    "declared_session_id",
     "ingest",
     "load_subject_manifest",
+    "recorded_session_id",
 ]

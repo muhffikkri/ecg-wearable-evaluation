@@ -38,6 +38,12 @@ First implementation of the architecture specified in `IDEA-REVISED.md`.
   already reports every absent template field and the builder separately reports
   what the recording cannot supply, so a plain extend counted each absence twice.
   The two lists are now merged.
+- `ingest()` no longer counts a generated dataset twice when it is kept inside
+  `data/` beside the recording it came from. The raw tree is read first, and a
+  JSONL file whose `session_id` the raw tree already provides is skipped and
+  recorded in `dataset.derived_datasets`. Previously the JSONL reader derived the
+  subject from the filename while the raw reader derived it from the folder, so
+  the same 20 frames appeared as two sessions and inflated every count.
 
 ### Changed
 

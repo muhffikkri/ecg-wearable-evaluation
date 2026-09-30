@@ -12,7 +12,14 @@ from .calibrated_reader import read_calibrated
 from .jsonl_reader import JSONLReadResult, MalformedRecord, iter_jsonl_files, read_jsonl_file
 from .log_reader import read_logs
 from .model_ready_reader import read_model_ready, recorded_source_number
-from .pipeline import Dataset, dataset_summary, ingest, load_subject_manifest
+from .pipeline import (
+    Dataset,
+    dataset_summary,
+    declared_session_id,
+    ingest,
+    load_subject_manifest,
+    recorded_session_id,
+)
 from .prediction_reader import read_predictions
 from .raw_dataset_reader import (
     discover_raw_roots,
@@ -47,6 +54,7 @@ __all__ = [
     "build_inventory",
     "collect_frame_files",
     "dataset_summary",
+    "declared_session_id",
     "discover_raw_roots",
     "ingest",
     "iter_jsonl_files",
@@ -62,6 +70,7 @@ __all__ = [
     "read_raw_dataset",
     "read_raw_directory",
     "read_session_metadata",
+    "recorded_session_id",
     "recorded_source_number",
     "sha256_file",
     "validate_frames",
