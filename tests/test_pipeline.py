@@ -35,6 +35,7 @@ from ecg_eval.models.annotation import (
     SubjectAnnotation,
 )
 from ecg_eval.preprocessing import preprocess
+from conftest import requires_real_data
 
 FS = 250.0
 
@@ -383,6 +384,7 @@ def annotated_dataset():
     return dataset, annotations
 
 
+@requires_real_data
 def test_run_analysis_over_real_dataset(annotated_dataset):
     dataset, annotations = annotated_dataset
     config = load_config("default")
@@ -668,6 +670,7 @@ def test_export_writes_all_artifacts(tmp_path, annotated_dataset):
     assert "subject_id" in written["frame_results"].read_text(encoding="utf-8").splitlines()[0]
 
 
+@requires_real_data
 def test_export_does_not_touch_data(tmp_path, annotated_dataset):
     dataset, annotations = annotated_dataset
     analysis = run_analysis(dataset, annotations, load_config("default"),

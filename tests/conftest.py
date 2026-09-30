@@ -17,6 +17,20 @@ if str(SRC) not in sys.path:
 from ecg_eval.config import load_config  # noqa: E402
 from ecg_eval.models.frame import ECGFrame  # noqa: E402
 
+#: The recording tree is deliberately untracked, so it is absent from a fresh
+#: clone. Tests that exercise the real data depend on it and skip with a reason
+#: rather than failing, otherwise a fresh checkout looks broken.
+DATA_DIR = REPO_ROOT / "data"
+RAW_RECORDING = DATA_DIR / "29-09-2026" / "Bryan"
+
+requires_real_data = pytest.mark.skipif(
+    not RAW_RECORDING.is_dir(),
+    reason=(
+        "the recorded Raspberry Pi session is not present; data/ is untracked by "
+        "design, so a fresh clone has no recording to exercise"
+    ),
+)
+
 
 @pytest.fixture(scope="session")
 def config():

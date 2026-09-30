@@ -16,6 +16,7 @@ from ecg_eval.ingestion import (
     validate_sampling_rates,
 )
 from ecg_eval.models.annotation import SUPINE, Segment, SubjectAnnotation
+from conftest import requires_real_data
 
 
 def test_reads_valid_frames(jsonl_file):
@@ -148,6 +149,7 @@ def test_annotation_coverage_counts(make_frame):
     assert coverage["unlabeled_frames"] == 3
 
 
+@requires_real_data
 def test_ingest_real_dataset():
     """Ingest the repository's actual data directory."""
     dataset = ingest()
