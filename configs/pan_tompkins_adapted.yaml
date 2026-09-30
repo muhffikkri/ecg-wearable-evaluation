@@ -1,0 +1,28 @@
+# Adapted / experimental configuration.
+#
+# This is NOT a Zhao & Zhang reproduction. It replaces detector B of the
+# primary qSQI (zhao_wavelet) with Pan-Tompkins, so the two detectors being
+# matched are zhao_hilbert vs pan_tompkins. Results produced with this config
+# are labelled "Pan-Tompkins adaptation" throughout the UI and in every export.
+#
+# See IDEA.md sections 20, 21, 22.
+
+extends: zhao_zhang
+
+meta:
+  config_name: pan_tompkins_adapted
+  config_version: "0.1.0"
+  methodology: "Zhao & Zhang SQI with Pan-Tompkins substituted for the wavelet detector"
+  is_strict_reproduction: false
+  adaptation: >
+    Detector B replaced: wavelet R-peak detection -> Pan-Tompkins. The
+    remaining three SQIs and the fuzzy stage are unchanged. The resulting qSQI
+    measures detector agreement between two DIFFERENT algorithms than the
+    reference, so absolute qSQI values are not comparable with the
+    Zhao-Zhang reproduction.
+
+rpeak:
+  primary_detector_a: zhao_hilbert
+  primary_detector_b: pan_tompkins
+  # The wavelet detector remains available for manual comparison.
+  adapted_detector_b: pan_tompkins

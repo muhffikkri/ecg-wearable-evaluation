@@ -1,0 +1,161 @@
+# ---------------------------------------------------------------------------
+# Zhao & Zhang (2018) reference configuration
+#
+# REFERENCE
+#   Zhao, Z., & Zhang, Y. (2018). SQI Quality Evaluation Mechanism of
+#   Single-Lead ECG Signal Based on Simple Heuristic Fusion and Fuzzy
+#   Comprehensive Evaluation. Frontiers in Physiology, 9, 727.
+#   https://doi.org/10.3389/fphys.2018.00727
+#
+# PROVENANCE POLICY (IDEA.md sections 2, 24, 26, 42, 62)
+#   Every scientific parameter below carries a `source` field:
+#     - "zhao_zhang_2018"  -> taken from the paper, verified during implementation
+#     - "pending_verification" -> value present but NOT yet confirmed against
+#       the paper. The application surfaces these in the UI and marks the
+#       corresponding run as NOT a strict reproduction.
+#   Nothing in this file may be changed silently. If a number is substituted,
+#   the configuration name changes too (see pan_tompkins_adapted.yaml).
+# ---------------------------------------------------------------------------
+
+meta:
+  config_name: zhao_zhang
+  config_version: "0.1.0"
+  methodology: "Zhao & Zhang (2018) SQI + fuzzy comprehensive evaluation"
+  is_strict_reproduction: false   # flipped to true once all sources are verified
+  verification_notes: >
+    Membership-function and weight parameters are still pending verification
+    against the published paper. Until that is done, runs using this config are
+    reported as a STRUCTURED REPRODUCTION, not a verified reproduction.
+
+dataset:
+  expected_subjects: 12
+  expected_positions: 3
+  expected_frames_per_position: 6
+  expected_total_frames: 216
+
+signal:
+  # Observed from the actual dataset (see src/ecg_eval/ingestion/jsonl_reader.py
+  # and src/ecg_eval/ingestion/raw_reader.py, both verified in
+  # tests/test_ingestion.py).
+  # These describe the wearable, not the reference paper.
+  sampling_rate_hz: 250.0
+  frame_duration_s: 10.0
+  channel_order: ["Lead I", "Lead II", "Lead III"]
+  analysis_lead: "Lead II"   # selected_lead in the raw calibrated metadata
+  unit: mV
+
+preprocessing:
+  # ADAPTATION: the wearable data already carries a 50 Hz notch from the
+  # device firmware (see model_ready/frame_*_input.json -> source_processing).
+  # The reference pipeline operates on database records without that stage.
+  # Baseline removal is therefore done here, in the analysis layer, and is
+  # reported as an adaptation.
+  remove_baseline: true
+  baseline_method: median          # documented adaptation, not from the paper
+  highpass_hz: null                # not applied; baseline removal covers it
+  lowpass_hz: null                 # not applied
+  notch_hz: null                   # already applied on-device, not re-applied
+  applied: false                   # user must explicitly execute preprocessing
+
+rpeak:
+  # Zhao & Zhang use two independent detectors and match their outputs.
+  primary_detector_a: zhao_hilbert
+  primary_detector_b: zhao_wavelet
+  # Adaptive mode: detector B is replaced by Pan-Tompkins. This is an
+  # adaptation and is labelled as such everywhere in the UI.
+  adapted_detector_b: pan_tompkins
+  search_backward_ms: 30.0         # hysteresis/search-back for refractory logic
+  refractory_ms: 200.0
+  min_peak_height_frac: 0.0        # fraction of signal max used as height floor
+
+q_sqi:
+  # Peak-to-peak matching tolerance window.
+  # IDEA.md section 20: must follow the Zhao & Zhang formulation exactly.
+  match_tolerance_ms:
+    value: 150.0
+    source: pending_verification
+    note: >
+      Standard ECG R-peak matching tolerances lie in the 100-150 ms range
+      (ANSI/AAMI EC57 recommends 150 ms). Confirm against the paper before
+      claiming strict reproduction.
+  formula: "n_matched / min(n_peaks_A, n_peaks_B)"
+  formula_source: pending_verification
+  adaptive:
+    enabled: false
+    note: >
+      When enabled, the tolerance scales with the heart rate estimated from
+      detector B. Off by default so the primary qSQI stays non-adaptive.
+
+p_sqi:
+  # Power in the QRS-related band divided by total in-band power.
+  qrs_band_hz: [5.0, 15.0]
+  qrs_band_source: pending_verification
+  total_band_hz: [0.5, 40.0]
+  total_band_source: pending_verification
+  psd_method: welch
+  psd_nperseg: 500          # 2 s at 250 Hz
+  psd_source: pending_verification
+
+k_sqi:
+  # Kurtosis convention is stated explicitly so a library default can never
+  # silently define the science (IDEA.md section 25).
+  #   fisher  -> E[(x-mean)^4]/sigma^4 - 3  (Gaussian = 0)
+  #   pearson -> E[(x-mean)^4]/sigma^4      (Gaussian = 3)
+  definition:
+    value: fisher
+    source: pending_verification
+  compute_on:
+    value: preprocessed
+    source: pending_verification
+
+bas_sqi:
+  baseline_band_hz: [0.0, 1.0]
+  baseline_band_source: pending_verification
+  total_band_hz: [0.0, 40.0]
+  total_band_source: pending_verification
+  psd_nperseg: 500
+
+fuzzy:
+  # Rating levels V = {Excellent, Barely Acceptable, Unacceptable}
+  levels: ["Excellent", "Barely Acceptable", "Unacceptable"]
+
+  # Membership function families required by IDEA.md section 27.
+  # Cauchy for qSQI and basSQI, trapezoidal for pSQI, rectangular for kSQI.
+  #
+  # Parameters are given per rating level so every one of the three levels is
+  # explicit and nothing is derived at runtime. Family shapes:
+  #   cauchy:       mu(x) = 1 / (1 + ((x - xc) / gamma)^2)
+  #   trapezoidal:  mu(x) = ramp up [a,b], plateau 1 [b,c], ramp down [c,d]
+  #   rectangular:  mu(x) = 1 inside [a,b], 0 outside
+  membership:
+    qSQI:
+      family: cauchy
+      Excellent:         {xc: {value: 0.90, source: pending_verification}, gamma: {value: 0.08, source: pending_verification}}
+      Barely Acceptable: {xc: {value: 0.65, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+      Unacceptable:      {xc: {value: 0.35, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+    pSQI:
+      family: trapezoidal
+      Excellent:         {a: {value: 0.55, source: pending_verification}, b: {value: 0.80, source: pending_verification}, c: {value: 0.95, source: pending_verification}, d: {value: 1.00, source: pending_verification}}
+      Barely Acceptable: {a: {value: 0.25, source: pending_verification}, b: {value: 0.45, source: pending_verification}, c: {value: 0.60, source: pending_verification}, d: {value: 0.80, source: pending_verification}}
+      Unacceptable:      {a: {value: 0.00, source: pending_verification}, b: {value: 0.05, source: pending_verification}, c: {value: 0.25, source: pending_verification}, d: {value: 0.45, source: pending_verification}}
+    kSQI:
+      family: rectangular
+      Excellent:         {a: {value: 3.0, source: pending_verification}, b: {value: 20.0, source: pending_verification}}
+      Barely Acceptable: {a: {value: 2.0, source: pending_verification}, b: {value: 3.0, source: pending_verification}}
+      Unacceptable:      {a: {value: 0.0, source: pending_verification}, b: {value: 2.0, source: pending_verification}}
+    basSQI:
+      family: cauchy
+      Excellent:         {xc: {value: 0.90, source: pending_verification}, gamma: {value: 0.08, source: pending_verification}}
+      Barely Acceptable: {xc: {value: 0.65, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+      Unacceptable:      {xc: {value: 0.35, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+
+  # Weight vector W. sum(W) == 1 is asserted by tests/test_sqi.py.
+  weights:
+    qSQI:   {value: 0.25, source: pending_verification}
+    pSQI:   {value: 0.25, source: pending_verification}
+    kSQI:   {value: 0.25, source: pending_verification}
+    basSQI: {value: 0.25, source: pending_verification}
+
+  synthesis: bounded_max_product    # bounded (max-product) fuzzy synthesis
+  synthesis_source: pending_verification
+  decision: max_membership          # argmax over the membership vector

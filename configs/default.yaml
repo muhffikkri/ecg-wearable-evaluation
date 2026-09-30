@@ -1,0 +1,46 @@
+# Default configuration.
+#
+# Inherits the Zhao & Zhang formulation and adds what the paper does not cover:
+# operational settings (paths, cache key) and the harness-level thresholds for
+# input validation, repeated-measures statistics and problematic-frame listing.
+#
+# The thresholds below are analysis-harness choices, NOT values from the paper,
+# so they carry no `source` annotation. The four SQI and fuzzy parameters, which
+# ARE the science, live in zhao_zhang.yaml and are inherited unchanged.
+
+extends: zhao_zhang
+
+paths:
+  data_dir: data
+  annotations_dir: annotations
+  results_dir: results
+  processed_dir: processed
+  configs_dir: configs
+
+cache:
+  enabled: true
+  # A frame result is keyed by frame content hash + config hash + annotation hash.
+  key_components: [frame_content_hash, config_hash, annotation_hash]
+
+validation:
+  # Input sanity limits applied to every frame before it reaches the SQI stage.
+  # These only reject structurally impossible input; they are not quality scores.
+  max_abs_limit_mv: 1000.0
+  check_nan: true
+  check_inf: true
+  check_empty: true
+  check_sampling_rate_consistency: true
+
+statistics:
+  # Optional repeated-measures layer. Descriptive stats are always computed.
+  run_friedman: true
+  alpha: 0.05
+  # The application reports whether a difference is statistically detectable.
+  # It never declares a position clinically better or worse (IDEA.md section 34).
+  allow_anova: false
+
+interpretation:
+  # Frames at or below this Unacceptable membership are listed as problematic.
+  # This is a display threshold, not a clinical judgement about the subject.
+  problematic_unacceptable_threshold: 0.5
+  language: en
