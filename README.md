@@ -58,6 +58,30 @@ a measurement the device never made.
 The recording under `data/` is read-only. The writer refuses an output path
 inside the source tree.
 
+## Building a dataset from the command line
+
+The Reconstruction tab drives the same pipeline the CLI does:
+
+```bash
+# Preview: validates and reports, writes nothing.
+python scripts/build_jsonl_dataset.py data/29-09-2026/Bryan --dry-run
+
+# Build one recording.
+python scripts/build_jsonl_dataset.py data/29-09-2026/Bryan --output processed
+
+# Build every recording under data/.
+python scripts/build_jsonl_dataset.py data --output processed
+
+# Machine-readable summary.
+python scripts/build_jsonl_dataset.py data --output processed --json
+```
+
+Exit codes: `0` success, `1` validation failed, `2` unusable arguments. Pointing
+`--output` inside the recording is refused with exit `2`.
+
+Each run writes a `.jsonl` dataset plus a `.manifest.json` recording where every
+field came from and which fields the recording simply does not have.
+
 ## Scientific status
 
 This is **not** a verified reproduction, and the application says so on every
@@ -79,6 +103,7 @@ Two further limitations are stated in the code where they apply:
 ```text
 app.py                 Streamlit entry point
 app_ui/                presentation only, no scientific logic
+scripts/               build_jsonl_dataset.py, the CLI for dataset generation
 configs/               reference, adapted and default configurations
 templates/             json-web.jsonl, the dataset schema
 src/ecg_eval/

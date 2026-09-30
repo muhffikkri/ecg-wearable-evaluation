@@ -189,7 +189,14 @@ def build_record(frame: ECGFrame, *, validate: bool = True) -> BuiltRecord:
         if validate
         else RecordValidation(frame_id=frame.frame_id).finalise()
     )
-    validation.unavailable_fields.extend(unavailable)
+    # validate_record already reports template fields absent from the record.
+    # Merge rather than extend, or a field missing for both reasons is listed
+    # twice and the manifest's count stops matching the record.
+    known = set(validation.unavailable_fields)
+    for name in unavailable:
+        if name not in known:
+            validation.unavailable_fields.append(name)
+            known.add(name)
 
     return BuiltRecord(
         frame_id=frame.frame_id,

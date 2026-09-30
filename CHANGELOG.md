@@ -27,6 +27,17 @@ First implementation of the architecture specified in `IDEA-REVISED.md`.
 - Interpretation layer that blocks clinical claims and rewrites them.
 - Streamlit application with Dataset, Annotation, Analysis, Interpretation and
   Reconstruction tabs.
+- `scripts/build_jsonl_dataset.py`, a CLI for building datasets without opening
+  the app. Accepts a recording, a date folder or a `data` folder, previews with
+  `--dry-run`, emits JSON summaries with `--json`, and exits 0/1/2 for
+  success/validation failure/unusable arguments.
+
+### Fixed
+
+- The manifest listed `unavailable_fields` twice per frame. `validate_record`
+  already reports every absent template field and the builder separately reports
+  what the recording cannot supply, so a plain extend counted each absence twice.
+  The two lists are now merged.
 
 ### Changed
 

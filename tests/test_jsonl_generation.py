@@ -469,3 +469,35 @@ def test_an_empty_frame_list_writes_an_empty_file(tmp_path: Path) -> None:
 
     assert result.written == 0
     assert Path(result.output_path).read_text(encoding="utf-8") == ""
+
+# -- manifest unavailable_fields is not double counted --------------------
+
+
+def test_unavailable_fields_are_listed_once_per_frame(tmp_path: Path) -> None:
+    """A field missing for two reasons must not appear twice in the manifest.
+
+    ``validate_record`` reports every absent template field, and the builder
+    separately reports the fields the recording cannot supply. Both describe the
+    same absence, so a plain extend listed them twice.
+    """
+    result = write_jsonl(_frames(1), tmp_path)
+
+    manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["frames"], "manifest lists no frames"
+    for entry in manifest["frames"]:
+        names = entry["validation"]["unavailable_fields"]
+        assert names == sorted(set(names), key=names.index), names
+        assert set(UNAVAILABLE_IN_RAW) <= set(names), names
+
+
+def test_unavailable_fields_match_the_record_itself(tmp_path: Path) -> None:
+    """The manifest must list exactly the fields the record does not carry."""
+    result = write_jsonl(_frames(2), tmp_path)
+
+    manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+    lines = Path(result.output_path).read_text(encoding="utf-8").splitlines()
+    template = set(template_fields())
+    assert len(manifest["frames"]) == len(lines)
+    for entry, line in zip(manifest["frames"], lines):
+        absent = template - set(json.loads(line))
+        assert set(entry["validation"]["unavailable_fields"]) == absent
