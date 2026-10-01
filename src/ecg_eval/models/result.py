@@ -15,6 +15,24 @@ UNACCEPTABLE = "Unacceptable"
 
 QUALITY_CLASSES = (EXCELLENT, BARELY_ACCEPTABLE, UNACCEPTABLE)
 
+#: Per-index acceptance levels, as named by Zhao & Zhang (2018).
+#:
+#: Every index is judged against its own criterion *before* any fusion happens,
+#: so these levels are reported next to the index value and are never folded
+#: into the fused quality class.
+OPTIMAL = "optimal"
+SUSPICIOUS = "suspicious"
+UNQUALIFIED = "unqualified"
+
+#: Returned when an index's criterion cannot be applied to a frame at all --
+#: for example the QRS spectral power index when the heart rate lies outside the
+#: 60-160 bpm range the reference calibrated its limits on. Deliberately not one
+#: of the three real levels, so an inapplicable criterion can never be counted
+#: as suspicious or unqualified by accident.
+UNDEFINED = "undefined"
+
+ACCEPTANCE_LEVELS = (OPTIMAL, SUSPICIOUS, UNQUALIFIED)
+
 SQI_KEYS = ("qSQI", "pSQI", "kSQI", "basSQI")
 
 #: Display names for each signal-quality index.
@@ -35,6 +53,56 @@ SQI_LABELS: dict[str, str] = {
 def sqi_label(key: str) -> str:
     """Human-readable name for an SQI key, falling back to the key itself."""
     return SQI_LABELS.get(key, key)
+
+
+@dataclass
+class Acceptance:
+    """One signal-quality index judged against its own acceptance criterion.
+
+    ``level`` is one of :data:`OPTIMAL`, :data:`SUSPICIOUS` or
+    :data:`UNQUALIFIED`, or :data:`UNDEFINED` when the criterion does not apply
+    to this frame. The limits that produced the verdict are kept, so a reader
+    can re-check the comparison instead of trusting the label.
+    """
+
+    level: str = UNDEFINED
+    value: float = float("nan")
+    rule: str = ""
+    limits: dict[str, float] = field(default_factory=dict)
+    #: Set when ``level`` is UNDEFINED, saying what stopped the criterion.
+    reason: str = ""
+
+    @property
+    def defined(self) -> bool:
+        return self.level in ACCEPTANCE_LEVELS
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["defined"] = self.defined
+        return payload
+
+
+@dataclass
+class HeuristicFusionResult:
+    """Simple heuristic fusion of the per-index acceptance levels.
+
+    The reference builds the fused class from the *counts* of optimal,
+    suspicious and unqualified indices rather than from the index values, so the
+    counts are stored next to the class that they produced.
+    """
+
+    quality_class: str = UNDEFINED
+    n_factors: int = 0
+    counts: dict[str, int] = field(default_factory=dict)
+    levels: dict[str, str] = field(default_factory=dict)
+    rule: str = ""
+    #: False when at least one index had no applicable criterion, in which case
+    #: no fused class is defined and ``quality_class`` is UNDEFINED.
+    applied: bool = True
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -81,15 +149,15 @@ class SpectralResult:
 class FuzzyResult:
     """Evaluation matrix, weight vector, membership vector and decision.
 
-    Note on the membership values: they are the output of the configured
-    synthesis operator and must not be read as percentages that sum to 100%.
-    Each factor's row of the evaluation matrix does form a partition of unity
-    over the three rating levels, but ``bounded_max_product`` combines rows by
-    taking a maximum over factors, so the synthesised vector does not sum to 1.
-    Only a bounded sum of normalised rows with weights summing to 1 yields a
-    distribution. The values are reported exactly as computed rather than
-    rescaled, since rescaling would produce numbers no operator in the
-    literature defines.
+    The synthesised membership vector ``S`` is the output of the configured
+    operator and is reported exactly as computed. It is not rescaled: the
+    reference's rows of R are raw membership degrees that need not sum to 1 (the
+    Cauchy rows of qSQI and basSQI do not), so rescaling S would invent numbers
+    no operator in the literature produces.
+
+    ``score`` is the defuzzified value ``v`` of Eq (33), the quantity the
+    reported class is actually decided from. It lies between the smallest and
+    largest rating value, so it reads as "this frame sits near level v".
     """
 
     membership: dict[str, float] = field(default_factory=dict)
@@ -98,8 +166,12 @@ class FuzzyResult:
     quality_class: str = UNACCEPTABLE
     synthesis: str = ""
     config_version: str = ""
-    #: SQI factors whose value fell outside every membership function's support
-    #: and were assigned to the nearest level instead. Never silently empty.
+    #: Defuzzified score v of Eq (33); NaN when no rating could be formed.
+    score: float = float("nan")
+    #: Numerical value j of each rating level, as used by Eq (33).
+    rating_values: dict[str, float] = field(default_factory=dict)
+    #: SQI factors whose membership row was identically zero, so they carried no
+    #: weight into the synthesis. Recorded rather than dropped in silence.
     out_of_support_factors: list[str] = field(default_factory=list)
 
     @property
@@ -122,6 +194,8 @@ class FuzzyResult:
             "quality_class": self.quality_class,
             "synthesis": self.synthesis,
             "config_version": self.config_version,
+            "score": self.score,
+            "rating_values": self.rating_values,
             "out_of_support_factors": self.out_of_support_factors,
         }
 
@@ -144,6 +218,22 @@ class FrameResult:
     p_sqi: float = float("nan")
     k_sqi: float = float("nan")
     bas_sqi: float = float("nan")
+
+    #: Heart rate used by the acceptance criterion that depends on it,
+    #: estimated as 60 / mean R-R from the reference detections.
+    heart_rate_bpm: float = float("nan")
+    #: Per-index acceptance level: one of ACCEPTANCE_LEVELS, or UNDEFINED.
+    q_sqi_acceptance: str = ""
+    p_sqi_acceptance: str = ""
+    k_sqi_acceptance: str = ""
+    bas_sqi_acceptance: str = ""
+    #: Simple heuristic fusion (the reference's step 1), kept beside the fuzzy
+    #: class (step 2) so the two can be compared the way the article compares
+    #: them in its Table 4 and Table 5.
+    fusion_class: str = ""
+    fusion_optimal: int = 0
+    fusion_suspicious: int = 0
+    fusion_unqualified: int = 0
 
     fuzzy_excellent: float = float("nan")
     fuzzy_barely_acceptable: float = float("nan")
@@ -185,6 +275,15 @@ class FrameResult:
             "pSQI": self.p_sqi,
             "kSQI": self.k_sqi,
             "basSQI": self.bas_sqi,
+            "heart_rate_bpm": self.heart_rate_bpm,
+            "qSQI_acceptance": self.q_sqi_acceptance,
+            "pSQI_acceptance": self.p_sqi_acceptance,
+            "kSQI_acceptance": self.k_sqi_acceptance,
+            "basSQI_acceptance": self.bas_sqi_acceptance,
+            "fusion_class": self.fusion_class,
+            "fusion_optimal": self.fusion_optimal,
+            "fusion_suspicious": self.fusion_suspicious,
+            "fusion_unqualified": self.fusion_unqualified,
             "fuzzy_excellent": self.fuzzy_excellent,
             "fuzzy_barely_acceptable": self.fuzzy_barely_acceptable,
             "fuzzy_unacceptable": self.fuzzy_unacceptable,
@@ -228,14 +327,21 @@ class RunProvenance:
 
 
 __all__ = [
+    "ACCEPTANCE_LEVELS",
+    "Acceptance",
     "BARELY_ACCEPTABLE",
     "EXCELLENT",
     "FrameResult",
     "FuzzyResult",
+    "HeuristicFusionResult",
+    "OPTIMAL",
     "PeakMatchResult",
     "QUALITY_CLASSES",
     "RunProvenance",
     "SpectralResult",
     "SQI_KEYS",
+    "SUSPICIOUS",
     "UNACCEPTABLE",
+    "UNDEFINED",
+    "UNQUALIFIED",
 ]

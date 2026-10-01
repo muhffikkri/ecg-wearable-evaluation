@@ -16,6 +16,13 @@ import pandas as pd
 SQI_COLUMNS = ("qSQI", "pSQI", "kSQI", "basSQI")
 CLASS_COLUMNS = ("fuzzy_excellent", "fuzzy_barely_acceptable", "fuzzy_unacceptable")
 
+#: Acceptance levels reported per index (Zhao & Zhang 2018), plus the level used
+#: when a criterion does not apply to a frame at all.
+ACCEPTANCE_COLUMNS = ("optimal", "suspicious", "unqualified", "undefined")
+
+#: Column on a frame row holding the fused simple-heuristic-fusion class.
+FUSION_COLUMN = "fusion_class"
+
 
 def describe(values: Sequence[float]) -> dict[str, float]:
     """mean, median, SD, min, max and interquartile range.
@@ -180,6 +187,52 @@ def results_to_frame(results: Sequence[Any]) -> pd.DataFrame:
     return pd.DataFrame([r.to_row() for r in results])
 
 
+def acceptance_recap(
+    df: pd.DataFrame,
+    columns: Sequence[str] = SQI_COLUMNS,
+) -> pd.DataFrame:
+    """Per activity: how often each index landed in each acceptance level.
+
+    The reference rates every index on its own before fusing anything, so the
+    report needs this distribution and not only the index means: two activities
+    can share a mean index value while differing in how often that index was
+    unqualified. The fused heuristic class is summarised on the same rows so the
+    two steps can be read against each other.
+
+    Percentages use all valid frames of the activity as the denominator, and the
+    ``undefined`` bucket stays visible rather than being folded into a real
+    level, so a criterion that could not be applied is never read as a verdict.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    frame = df[df["valid"]] if "valid" in df else df
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for position, group in frame.groupby("position", dropna=False):
+        total = len(group)
+        row: dict[str, Any] = {"position": position, "n_frames": int(total)}
+        for column in columns:
+            key = f"{column}_acceptance"
+            if key not in group:
+                continue
+            values = group[key].fillna("").tolist()
+            for level in ACCEPTANCE_COLUMNS:
+                count = sum(1 for value in values if value == level)
+                row[f"{column}_{level}_n"] = count
+                row[f"{column}_{level}_pct"] = 100.0 * count / total if total else math.nan
+        if FUSION_COLUMN in group:
+            counts = group[FUSION_COLUMN].value_counts()
+            for level in (*CLASS_LEVELS, "undefined"):
+                count = int(counts.get(level, 0))
+                row[f"fusion_{level}_n"] = count
+                row[f"fusion_{level}_pct"] = 100.0 * count / total if total else math.nan
+        rows.append(row)
+
+    return _in_position_order(pd.DataFrame(rows), [])
+
+
 def aggregate_by(df: pd.DataFrame, keys: list[str], *, valid_only: bool = True) -> pd.DataFrame:
     """Group and compute descriptive stats for every SQI plus class shares."""
     if df.empty:
@@ -313,11 +366,14 @@ def activity_recap(
 
 
 __all__ = [
+    "ACCEPTANCE_COLUMNS",
     "ACCEPTED_CLASSES",
     "CLASS_COLUMNS",
     "CLASS_LEVELS",
+    "FUSION_COLUMN",
     "SQI_COLUMNS",
     "acceptable_share",
+    "acceptance_recap",
     "activity_recap",
     "aggregate_by",
     "box_outliers",

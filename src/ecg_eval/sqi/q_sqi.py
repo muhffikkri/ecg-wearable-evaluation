@@ -1,5 +1,16 @@
 """qSQI: agreement between two independent R-peak detectors.
 
+Rumus (Zhao & Zhang 2018, Eq 1)::
+
+    qSQI = 2N / (Na + Nb)
+
+    N  = puncak R yang cocok satu-lawan-satu di dalam jendela toleransi
+    Na = puncak R dari detektor A (Hilbert + ambang adaptif dinamis)
+    Nb = puncak R dari detektor B (transformasi wavelet)
+
+Penyebutnya adalah JUMLAH kedua cacah puncak, bukan cacah yang terkecil.
+Kriteria penerimaan (Eq 2) ada di :func:`q_sqi_acceptance`.
+
 Primary reproduction (IDEA.md section 20):
 
     Hilbert + dynamic adaptive threshold   vs   wavelet R-wave detection
@@ -20,7 +31,15 @@ from typing import Any
 import numpy as np
 
 from ..detectors import DetectionResult, get_detector
-from ..models.result import PeakMatchResult
+from ..models.result import (
+    OPTIMAL,
+    SUSPICIOUS,
+    UNQUALIFIED,
+    UNDEFINED,
+    Acceptance,
+    PeakMatchResult,
+)
+from ._params import unwrap
 
 LABEL_ZHAO = "zhao_zhang"
 LABEL_ADAPTED = "pan_tompkins_adapted"
@@ -100,8 +119,17 @@ def q_sqi(
         result_a.peaks, result_b.peaks, sampling_rate, tolerance
     )
 
-    denominator = min(result_a.peaks.size, result_b.peaks.size)
-    value = (len(pairs) / denominator) if denominator > 0 else 0.0
+    # Zhao & Zhang (2018) Eq (1): agreement is counted against the SUM of both
+    # detection counts, not against the smaller one:
+    #
+    #     qSQI = 2N / (Na + Nb)
+    #
+    # Dividing by min(Na, Nb) instead -- which this module did before -- reports
+    # 1.0 whenever one detector's peaks are a subset of the other's, so a
+    # detector that missed half the beats still scored a perfect match.
+    n_matched = len(pairs)
+    total_detected = int(result_a.peaks.size + result_b.peaks.size)
+    value = (2.0 * n_matched / total_detected) if total_detected > 0 else 0.0
 
     label = LABEL_ADAPTED if "pan_tompkins" in {detector_a, detector_b} else LABEL_ZHAO
     match = PeakMatchResult(
@@ -122,4 +150,67 @@ def q_sqi(
     return float(value), result_a, result_b, match
 
 
-__all__ = ["LABEL_ADAPTED", "LABEL_ZHAO", "match_peaks", "q_sqi"]
+#: Default limits of Eq (2). The configuration carries the same numbers with
+#: their provenance; these are only the fallback for a caller with no config.
+_DEFAULT_ACCEPTANCE = {
+    "optimal_above": 0.90,
+    "suspicious_from": 0.60,
+    "suspicious_to": 0.90,
+    "unqualified_below": 0.60,
+}
+
+ACCEPTANCE_RULE = "Zhao & Zhang (2018) Eq (2)"
+
+
+def acceptance_limits(config: Any = None) -> dict[str, float]:
+    """Acceptance limits for this index, read from the configuration section."""
+    section = (config.section("q_sqi") if config is not None else {}) or {}
+    spec = section.get("acceptance", {}) or {}
+    limits = dict(_DEFAULT_ACCEPTANCE)
+    for key in limits:
+        if key in spec:
+            limits[key] = float(unwrap(spec[key]))
+    return limits
+
+
+def q_sqi_acceptance(value: float, config: Any = None) -> Acceptance:
+    """Judge one qSQI value against Zhao & Zhang (2018) Eq (2).
+
+    ::
+
+        optimal      qSQI > 90 %
+        suspicious   60 % <= qSQI <= 90 %
+        unqualified  qSQI < 60 %
+
+    The outer rules are strict, and that is what resolves the shared boundaries:
+    exactly 90 % falls to suspicious and exactly 60 % also falls to suspicious,
+    which is what Eq (2) prints.
+    """
+    limits = acceptance_limits(config)
+    value = float(value)
+    if not np.isfinite(value):
+        return Acceptance(
+            level=UNDEFINED,
+            value=value,
+            rule=ACCEPTANCE_RULE,
+            limits=limits,
+            reason="qSQI is not a finite value",
+        )
+    if value > limits["optimal_above"]:
+        level = OPTIMAL
+    elif value >= limits["suspicious_from"]:
+        level = SUSPICIOUS
+    else:
+        level = UNQUALIFIED
+    return Acceptance(level=level, value=value, rule=ACCEPTANCE_RULE, limits=limits)
+
+
+__all__ = [
+    "ACCEPTANCE_RULE",
+    "LABEL_ADAPTED",
+    "LABEL_ZHAO",
+    "acceptance_limits",
+    "match_peaks",
+    "q_sqi",
+    "q_sqi_acceptance",
+]

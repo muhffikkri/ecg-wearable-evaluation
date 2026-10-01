@@ -16,7 +16,11 @@ from typing import Any, Sequence
 
 import pandas as pd
 
-from ..analysis.statistics import box_outliers, class_table
+from ..analysis.statistics import (
+    ACCEPTANCE_COLUMNS,
+    box_outliers,
+    class_table,
+)
 from ..models.result import SQI_KEYS, SQI_LABELS
 
 #: Aktivitas rekaman. Sumbu-y figure dan baris tabel memakai nama ini.
@@ -34,6 +38,22 @@ CLASS_LABELS_ID: dict[str, str] = {
 }
 
 POSITION_ORDER = ("SUPINE", "SITTING", "STANDING")
+
+#: Nama tampilan tingkat penerimaan tiap indeks. ``undefined`` bukan tingkat
+#: sungguhan: ia dipakai ketika kriteria artikel tidak dapat diterapkan pada
+#: sebuah frame, misalnya karena detak jantungnya di luar rentang 60-160 bpm.
+ACCEPTANCE_LABELS_ID: dict[str, str] = {
+    "optimal": "Optimal",
+    "suspicious": "Suspicious",
+    "unqualified": "Unqualified",
+    "undefined": "Tidak dapat diterapkan",
+}
+
+#: Nama tampilan kelas gabungan hasil fusi heuristik.
+FUSION_LABELS_ID: dict[str, str] = {
+    **CLASS_LABELS_ID,
+    "undefined": "Tidak dapat ditentukan",
+}
 
 #: Warna titik penyimpang. Biru tidak dipakai oleh kelas kualitas
 #: (hijau/kuning/merah) maupun warna posisi, sehingga titik biru selalu terbaca
@@ -194,6 +214,65 @@ def _fixed(value: Any, digits: int = 3) -> str:
     if not math.isfinite(number):
         return "-"
     return f"{number:.{digits}f}"
+
+
+def acceptance_recap_table(recap: pd.DataFrame) -> pd.DataFrame:
+    """Tabel rekapitulasi kriteria penerimaan tiap indeks per aktivitas.
+
+    Satu baris per aktivitas dan satu blok kolom per indeks kualitas sinyal,
+    berisi persentase frame pada tiap tingkat penerimaan artikel. Kolom fusi
+    disertakan karena kelas akhir yang dilaporkan berasal dari tahap fuzzy,
+    sehingga kelas fusi dan kelas fuzzy perlu dapat dibandingkan dalam satu
+    tabel. Nilai ``Tidak dapat diterapkan`` tidak pernah digabungkan ke tingkat
+    lain: kriteria yang tidak berlaku bukan sebuah penilaian.
+    """
+    if recap is None or recap.empty:
+        return pd.DataFrame()
+
+    columns: dict[str, Any] = {"Aktivitas": [], "Total Frame": []}
+    for key in SQI_KEYS:
+        if f"{key}_optimal_pct" not in recap:
+            continue
+        for level in ACCEPTANCE_COLUMNS:
+            columns[f"{sqi_label_id(key)} · {ACCEPTANCE_LABELS_ID[level]} (%)"] = []
+    if "fusion_optimal_pct" in recap:
+        for level, name in FUSION_LABELS_ID.items():
+            columns[f"Fusi · {name} (%)"] = []
+
+    for _, row in recap.iterrows():
+        columns["Aktivitas"].append(position_label(row["position"]))
+        columns["Total Frame"].append(int(row["n_frames"]))
+        for key in SQI_KEYS:
+            if f"{key}_optimal_pct" not in recap:
+                continue
+            for level in ACCEPTANCE_COLUMNS:
+                columns[f"{sqi_label_id(key)} · {ACCEPTANCE_LABELS_ID[level]} (%)"].append(
+                    _pct(row.get(f"{key}_{level}_pct"))
+                )
+        if "fusion_optimal_pct" in recap:
+            for level in FUSION_LABELS_ID:
+                columns[f"Fusi · {FUSION_LABELS_ID[level]} (%)"].append(
+                    _pct(row.get(f"fusion_{level}_pct"))
+                )
+
+    return pd.DataFrame(columns)
+
+
+def acceptance_recap_legend() -> str:
+    """Legenda tabel rekapitulasi kriteria penerimaan per aktivitas."""
+    indices = " · ".join(sqi_label_id(key) for key in SQI_KEYS)
+    levels = " · ".join(ACCEPTANCE_LABELS_ID[level] for level in ACCEPTANCE_COLUMNS)
+    return (
+        "**Legenda.** Baris adalah aktivitas rekaman. Setiap blok kolom adalah "
+        f"satu indeks kualitas sinyal ({indices}) dan berisi persentase frame "
+        f"pada tiap tingkat penerimaan menurut artikel Zhao & Zhang (2018): "
+        f"{levels}. Kolom `Fusi` adalah kelas gabungan hasil *simple heuristic "
+        "fusion* atas keempat tingkat tersebut. Kolom `Tidak dapat diterapkan` "
+        "memuat frame yang kriterianya tidak berlaku -- untuk Distribusi Daya "
+        "Spektral QRS hal ini terjadi bila detak jantung berada di luar rentang "
+        "60-160 bpm yang dikalibrasi artikel -- dan bukan merupakan penilaian. "
+        + _SCOPE_NOTE
+    )
 
 
 def activity_recap_legend() -> str:
@@ -1125,6 +1204,10 @@ __all__ = [
     "POSITION_LABELS_ID",
     "POSITION_ORDER",
     "RECAP_STATS",
+    "ACCEPTANCE_LABELS_ID",
+    "FUSION_LABELS_ID",
+    "acceptance_recap_legend",
+    "acceptance_recap_table",
     "acceptance_table",
     "acceptance_table_interpretation",
     "acceptance_table_legend",

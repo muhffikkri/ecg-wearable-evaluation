@@ -1,52 +1,131 @@
-"""Signal quality indices and fuzzy comprehensive evaluation."""
+"""Signal quality indices and fuzzy comprehensive evaluation.
 
-from .bas_sqi import bas_sqi, bas_sqi_config
+Zhao & Zhang (2018): each index is judged against its own acceptance criterion
+(optimal / suspicious / unqualified), the four verdicts are fused by the simple
+heuristic rule of Eq (15), and the fused factors also feed the fuzzy
+comprehensive evaluation of Eq (20)-(34).
+"""
+
+from ._params import unwrap
+from .bas_sqi import bas_sqi, bas_sqi_acceptance, bas_sqi_config
 from .fuzzy import (
     FACTORS,
     LEVELS,
+    LEVEL_SHORT,
+    MEMBERSHIP_FAMILIES,
     SYNTHESIS_OPERATORS,
     bounded_max_product,
     bounded_sum,
     build_membership_functions,
     build_weight_vector,
     cauchy,
+    cauchy_centred,
+    cauchy_decreasing,
+    cauchy_increasing,
     decide,
     evaluate,
+    factor_scales,
+    max_membership_level,
+    ramp_down,
+    ramp_up,
+    rating_values,
     rectangular,
+    step_above,
+    step_at_or_below,
     synthesize,
     trapezoidal,
+    weighted_average_score,
+    zero_membership,
 )
-from .k_sqi import FISHER, PEARSON, k_sqi, k_sqi_config, kurtosis
-from .p_sqi import band_power, compute_psd, p_sqi, p_sqi_config
-from .q_sqi import LABEL_ADAPTED, LABEL_ZHAO, match_peaks, q_sqi
+from .heuristic_fusion import (
+    FUSION_FACTORS,
+    FUSION_RULES,
+    FUSION_RULE_REFS,
+    assess,
+    estimate_heart_rate,
+    fuse_levels,
+    heart_rate_from_peaks,
+)
+from .k_sqi import (
+    FISHER,
+    PEARSON,
+    k_sqi,
+    k_sqi_acceptance,
+    k_sqi_config,
+    kurtosis,
+)
+from .p_sqi import (
+    band_power,
+    compute_psd,
+    heart_rate_bands,
+    p_sqi,
+    p_sqi_acceptance,
+    p_sqi_config,
+)
+from .q_sqi import (
+    LABEL_ADAPTED,
+    LABEL_ZHAO,
+    acceptance_limits,
+    match_peaks,
+    q_sqi,
+    q_sqi_acceptance,
+)
 
 __all__ = [
     "FACTORS",
     "FISHER",
+    "FUSION_FACTORS",
+    "FUSION_RULES",
+    "FUSION_RULE_REFS",
     "LABEL_ADAPTED",
     "LABEL_ZHAO",
     "LEVELS",
+    "LEVEL_SHORT",
+    "MEMBERSHIP_FAMILIES",
     "PEARSON",
     "SYNTHESIS_OPERATORS",
+    "acceptance_limits",
+    "assess",
     "band_power",
     "bas_sqi",
+    "bas_sqi_acceptance",
     "bas_sqi_config",
     "bounded_max_product",
     "bounded_sum",
     "build_membership_functions",
     "build_weight_vector",
     "cauchy",
+    "cauchy_centred",
+    "cauchy_decreasing",
+    "cauchy_increasing",
     "compute_psd",
     "decide",
+    "estimate_heart_rate",
     "evaluate",
+    "factor_scales",
+    "fuse_levels",
+    "heart_rate_bands",
+    "heart_rate_from_peaks",
     "k_sqi",
+    "k_sqi_acceptance",
     "k_sqi_config",
     "kurtosis",
     "match_peaks",
+    "max_membership_level",
     "p_sqi",
+    "p_sqi_acceptance",
     "p_sqi_config",
     "q_sqi",
+    "q_sqi_acceptance",
+    "ramp_down",
+    "ramp_up",
+    "rating_values",
     "rectangular",
+    "step_above",
+    "step_at_or_below",
     "synthesize",
     "trapezoidal",
+    "unwrap",
+    "weighted_average_score",
+    "zero_membership",
 ]

@@ -353,29 +353,47 @@ def test_analyzer_produces_all_intermediates(config, make_frame, clean_signal):
     assert 0.0 <= result.bas_sqi <= 1.0
     assert result.quality_class in {"Excellent", "Barely Acceptable", "Unacceptable"}
 
-    # The configured synthesis is a max-product, so the three memberships are the
-    # strongest single weighted factor per level, not shares of a distribution,
-    # and are deliberately not rescaled to sum to 1.
+    # The memberships are the article's bounded sum S = W o R over its raw
+    # membership rows, and are deliberately not rescaled: the Cauchy rows of
+    # qSQI and basSQI do not sum to 1, so neither does S.
     assert 0.0 <= result.fuzzy_excellent <= 1.0
     assert 0.0 <= result.fuzzy_barely_acceptable <= 1.0
     assert 0.0 <= result.fuzzy_unacceptable <= 1.0
-    membership = result.fuzzy_excellent + result.fuzzy_barely_acceptable + result.fuzzy_unacceptable
-    assert 0.0 < membership <= 1.0
+    assert 0.0 < result.fuzzy_excellent + result.fuzzy_unacceptable
+
+    # The reported class is decided from the defuzzified score v of Eq (33),
+    # which lies between the rating values 1 (Excellent) and 3 (Unacceptable).
+    assert 1.0 <= result.run_provenance["fuzzy"]["score"] <= 3.0
+    assert math.isfinite(result.heart_rate_bpm)
+    assert result.q_sqi_acceptance in {"optimal", "suspicious", "unqualified", "undefined"}
+    assert result.p_sqi_acceptance in {"optimal", "suspicious", "unqualified", "undefined"}
+    assert result.fusion_class in {"Excellent", "Barely Acceptable", "Unacceptable", "undefined"}
+    assert (
+        result.fusion_optimal + result.fusion_suspicious + result.fusion_unqualified
+    ) <= 4
 
     provenance = result.run_provenance
-    for key in ("detector_a", "detector_b", "spectral", "fuzzy", "match_tolerance_ms", "reference"):
+    for key in (
+        "detector_a", "detector_b", "spectral", "fuzzy", "match_tolerance_ms",
+        "reference", "acceptance", "fusion", "heart_rate_bpm", "heart_rate_source",
+    ):
         assert key in provenance
     assert provenance["spectral"]["qrs_band_power"] >= 0
     assert provenance["spectral"]["baseline_band_power"] >= 0
     assert provenance["fuzzy"]["membership"]
+    assert provenance["acceptance"]["rules"]["qSQI"].startswith("Zhao & Zhang")
+    assert provenance["fusion"]["rule"].startswith("Zhao & Zhang")
 
 
 def test_clean_signal_scores_better_than_noisy(config, make_frame, clean_signal, noisy_signal):
     analyzer = FrameAnalyzer(config, cache=ResultCache(None, enabled=False))
     good = analyzer.analyze_frame(make_frame(clean_signal), SUPINE)
     bad = analyzer.analyze_frame(make_frame(noisy_signal), SUPINE)
-    assert good.fuzzy_unacceptable <= bad.fuzzy_unacceptable
     assert good.k_sqi > bad.k_sqi
+    # A lower v is a better rating (v1 = Excellent, v3 = Unacceptable), so the
+    # clean frame must not be rated worse than the noisy one.
+    assert good.run_provenance["fuzzy"]["score"] <= bad.run_provenance["fuzzy"]["score"]
+    assert good.fusion_unqualified <= bad.fusion_unqualified
 
 
 def test_invalid_frame_is_marked_not_crashed(config, make_frame):
@@ -815,16 +833,26 @@ def test_export_does_not_touch_data(tmp_path, annotated_dataset):
 # ---------------------------------------------------------------------------
 def test_config_exposes_pending_parameters(zhao_config):
     pending = zhao_config.pending_parameters()
-    assert pending, "the config must declare which values still await verification"
-    assert zhao_config.is_strict_reproduction is False
     paths = {path for path, _ in pending}
-    assert "fuzzy.weights.qSQI" in paths
-    assert "q_sqi.match_tolerance_ms" in paths
-    assert "k_sqi.definition" in paths
-    # Every SQI factor has explicit parameters for all three rating levels.
+    # The article prints no R-peak matching tolerance and does not say whether
+    # kurtosis is computed before or after filtering, so exactly those two
+    # engine parameters stay declared as unverified. Everything the article does
+    # print is recorded as verified against the equation it came from.
+    assert paths == {"q_sqi.match_tolerance_ms", "k_sqi.compute_on"}
+    assert zhao_config.is_strict_reproduction is False
+
+    verified = {path for path, _ in zhao_config.verified_parameters()}
+    assert "q_sqi.acceptance.optimal_above" in verified
+    assert "k_sqi.acceptance.optimal_above" in verified
+    assert "bas_sqi.acceptance.unqualified_below" in verified
+    assert "p_sqi.acceptance.heart_rate_bands[0].l1" in verified
+    assert "fuzzy.weights.qSQI" in verified
+    assert "fuzzy.rating_values.Excellent" in verified
+    assert "fuzzy.decision.excellent_max" in verified
+    # Every index has explicit membership parameters for all three rating levels.
     for factor in ("qSQI", "pSQI", "kSQI", "basSQI"):
         for level in ("Excellent", "Barely Acceptable", "Unacceptable"):
-            assert any(p.startswith(f"fuzzy.membership.{factor}.{level}.") for p in paths)
+            assert any(p.startswith(f"fuzzy.membership.{factor}.{level}.") for p in verified)
 
 
 def test_config_inheritance():

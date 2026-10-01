@@ -38,6 +38,9 @@ from ..models.annotation import STATIC_POSITIONS
 from ..models.frame import ECGFrame
 from ..models.result import (
     EXCELLENT,
+    OPTIMAL,
+    SUSPICIOUS,
+    UNQUALIFIED,
     FrameResult,
     FuzzyResult,
     PeakMatchResult,
@@ -47,6 +50,7 @@ from ..models.result import (
 from ..preprocessing import preprocess, resolve_config as resolve_preprocessing
 from ..sqi import bas_sqi as bas_sqi_fn
 from ..sqi import fuzzy as fuzzy_module
+from ..sqi import heuristic_fusion as fusion_module
 from ..sqi import k_sqi as k_sqi_fn
 from ..sqi import p_sqi as p_sqi_fn
 from ..sqi import q_sqi as q_sqi_fn
@@ -168,7 +172,7 @@ class FrameAnalyzer:
     def p_sqi_params(self) -> dict[str, Any]:
         return {
             "qrs_band_hz": tuple(self.config.get("p_sqi.qrs_band_hz", (5.0, 15.0))),
-            "total_band_hz": tuple(self.config.get("p_sqi.total_band_hz", (0.5, 40.0))),
+            "total_band_hz": tuple(self.config.get("p_sqi.total_band_hz", (5.0, 40.0))),
             "nperseg": int(self.config.get("p_sqi.psd_nperseg", 500)),
             "method": str(self.config.get("p_sqi.psd_method", "welch")),
         }
@@ -365,8 +369,33 @@ class FrameAnalyzer:
         bas_value, bas_spectral = bas_sqi_fn(analysis_signal, frame.sampling_rate, **self.bas_sqi_params)
         result.bas_sqi = bas_value
 
-        # Fuzzy comprehensive evaluation
+        # Heart rate, needed by the QRS spectral power acceptance criterion.
+        # Estimated from the reference detections, never assumed.
+        heart_rate_bpm, heart_rate_source = fusion_module.estimate_heart_rate(
+            det_a.peaks, det_b.peaks, sampling_rate=frame.sampling_rate
+        )
+        result.heart_rate_bpm = heart_rate_bpm
+
         sqi_values = {"qSQI": q_value, "pSQI": p_value, "kSQI": k_value, "basSQI": bas_value}
+
+        # Step 1 of the reference: judge every index against its own criterion,
+        # then fuse the four verdicts with the simple heuristic rule.
+        acceptances, fusion = fusion_module.assess(
+            sqi_values,
+            heart_rate_bpm=heart_rate_bpm,
+            config=self.config,
+            kurtosis_definition=self.k_sqi_params["definition"],
+        )
+        result.q_sqi_acceptance = acceptances["qSQI"].level
+        result.p_sqi_acceptance = acceptances["pSQI"].level
+        result.k_sqi_acceptance = acceptances["kSQI"].level
+        result.bas_sqi_acceptance = acceptances["basSQI"].level
+        result.fusion_class = fusion.quality_class
+        result.fusion_optimal = int(fusion.counts.get(OPTIMAL, 0))
+        result.fusion_suspicious = int(fusion.counts.get(SUSPICIOUS, 0))
+        result.fusion_unqualified = int(fusion.counts.get(UNQUALIFIED, 0))
+
+        # Step 2: fuzzy comprehensive evaluation.
         try:
             fuzzy_result = fuzzy_module.evaluate(sqi_values, self.fuzzy_config)
         except ValueError as exc:
@@ -396,6 +425,14 @@ class FrameAnalyzer:
                         # full on/off state of every filter, so the report can state which
                         # stages ran AND which were deliberately skipped
                         "preprocessing_stages": dict(processed.stages),
+            "heart_rate_bpm": heart_rate_bpm,
+            "heart_rate_source": heart_rate_source,
+            "acceptance": {
+                "rules": {name: item.rule for name, item in acceptances.items()},
+                "levels": {name: item.level for name, item in acceptances.items()},
+                "detail": {name: item.to_dict() for name, item in acceptances.items()},
+            },
+            "fusion": fusion.to_dict(),
             "fuzzy": fuzzy_result.to_dict(),
             "spectral": {
                 "qrs_band_power": spectral.qrs_band_power,
@@ -469,6 +506,15 @@ def _result_from_payload(payload: dict[str, Any]) -> FrameResult | None:
         p_sqi=float(row.get("pSQI", float("nan"))),
         k_sqi=float(row.get("kSQI", float("nan"))),
         bas_sqi=float(row.get("basSQI", float("nan"))),
+        heart_rate_bpm=float(row.get("heart_rate_bpm", float("nan"))),
+        q_sqi_acceptance=str(row.get("qSQI_acceptance", "")),
+        p_sqi_acceptance=str(row.get("pSQI_acceptance", "")),
+        k_sqi_acceptance=str(row.get("kSQI_acceptance", "")),
+        bas_sqi_acceptance=str(row.get("basSQI_acceptance", "")),
+        fusion_class=str(row.get("fusion_class", "")),
+        fusion_optimal=int(row.get("fusion_optimal", 0) or 0),
+        fusion_suspicious=int(row.get("fusion_suspicious", 0) or 0),
+        fusion_unqualified=int(row.get("fusion_unqualified", 0) or 0),
         fuzzy_excellent=float(row.get("fuzzy_excellent", float("nan"))),
         fuzzy_barely_acceptable=float(row.get("fuzzy_barely_acceptable", float("nan"))),
         fuzzy_unacceptable=float(row.get("fuzzy_unacceptable", float("nan"))),

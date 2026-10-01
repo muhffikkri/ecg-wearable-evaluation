@@ -88,6 +88,13 @@ class Config:
             for key, child in node.items():
                 child_path = f"{path}.{key}" if path else str(key)
                 yield from self.iter_provenance(child, child_path)
+        elif isinstance(node, list):
+            # Annotated values also live inside lists: the pSQI heart-rate bands
+            # of Eq (5) are a list of parameter sets. Walking them keeps those
+            # article values in the pending/verified report instead of letting
+            # them fall outside provenance because of their container.
+            for index, child in enumerate(node):
+                yield from self.iter_provenance(child, f"{path}[{index}]")
 
     def pending_parameters(self) -> list[tuple[str, Any]]:
         """Parameters still awaiting verification against the published paper."""

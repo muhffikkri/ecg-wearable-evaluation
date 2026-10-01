@@ -9,23 +9,38 @@
 #
 # PROVENANCE POLICY (IDEA.md sections 2, 24, 26, 42, 62)
 #   Every scientific parameter below carries a `source` field:
-#     - "zhao_zhang_2018"  -> taken from the paper, verified during implementation
-#     - "pending_verification" -> value present but NOT yet confirmed against
-#       the paper. The application surfaces these in the UI and marks the
-#       corresponding run as NOT a strict reproduction.
+#     - "zhao_zhang_2018"  -> taken from the paper, verified against the
+#       published article and recorded with the equation it came from
+#     - "pending_verification" -> value present but NOT printed in the paper.
+#       The application surfaces these in the UI and marks the corresponding
+#       run as NOT a strict reproduction.
 #   Nothing in this file may be changed silently. If a number is substituted,
 #   the configuration name changes too (see pan_tompkins_adapted.yaml).
+#
+# WHAT CHANGED IN 0.2.0
+#   The four index formulas and their acceptance criteria, the membership
+#   functions, the weight vector, the synthesis operator and the decision rule
+#   were all replaced with the values printed in the article. Parameters the
+#   article does not print (the R-peak matching tolerance, the PSD estimator
+#   settings) deliberately stay pending_verification rather than being promoted
+#   on the strength of the numbers that now are verified.
 # ---------------------------------------------------------------------------
 
 meta:
   config_name: zhao_zhang
-  config_version: "0.1.0"
-  methodology: "Zhao & Zhang (2018) SQI + fuzzy comprehensive evaluation"
-  is_strict_reproduction: false   # flipped to true once all sources are verified
+  config_version: "0.2.0"
+  methodology: "Zhao & Zhang (2018) SQI + simple heuristic fusion + fuzzy comprehensive evaluation"
+  is_strict_reproduction: false
   verification_notes: >
-    Membership-function and weight parameters are still pending verification
-    against the published paper. Until that is done, runs using this config are
-    reported as a STRUCTURED REPRODUCTION, not a verified reproduction.
+    Formulas, acceptance criteria, membership functions, weight vector,
+    synthesis operator and decision thresholds are verified against the
+    published article and cite their equation numbers. The configuration is
+    still NOT a strict reproduction, because the article prints no R-peak
+    matching tolerance and no PSD estimator settings; those parameters remain
+    marked pending_verification and the run is reported as a structured
+    reproduction. The recordings analysed here are also a wearable dataset, not
+    the PhysioNet databases the article used, so the article's reported
+    accuracy, sensitivity and specificity are not this project's results.
 
 dataset:
   expected_subjects: 12
@@ -83,7 +98,10 @@ preprocessing:
     clip_max: 5.0
 
 rpeak:
-  # Zhao & Zhang use two independent detectors and match their outputs.
+  # Zhao & Zhang use two independent detectors and match their outputs
+  # (article section "Matching degree of R peak detection"): Algorithm 1 is
+  # Hilbert with a dynamic adaptive threshold, Algorithm 2 is a wavelet
+  # transform detector.
   primary_detector_a: zhao_hilbert
   primary_detector_b: zhao_wavelet
   # Adaptive mode: detector B is replaced by Pan-Tompkins. This is an
@@ -91,20 +109,39 @@ rpeak:
   adapted_detector_b: pan_tompkins
   search_backward_ms: 30.0         # hysteresis/search-back for refractory logic
   refractory_ms: 200.0
-  min_peak_height_frac: 0.0        # fraction of signal max used as height floor
+  min_peak_height_frac: 0.0        # fraction of signal max used as a height floor
 
 q_sqi:
-  # Peak-to-peak matching tolerance window.
-  # IDEA.md section 20: must follow the Zhao & Zhang formulation exactly.
+  # qSQI = 2N / (Na + Nb)                              -- article Eq (1)
+  #   N  = R peaks matched one-to-one between the two detectors
+  #   Na = R peaks from Algorithm 1 (Hilbert + adaptive threshold)
+  #   Nb = R peaks from Algorithm 2 (wavelet)
+  # The denominator is the SUM of both counts, not the smaller one. Dividing by
+  # min(Na, Nb) would report perfect agreement whenever one detector found a
+  # subset of the other's peaks.
+  formula: "2N / (Na + Nb)"
+  formula_source: zhao_zhang_2018
   match_tolerance_ms:
     value: 150.0
     source: pending_verification
     note: >
-      Standard ECG R-peak matching tolerances lie in the 100-150 ms range
-      (ANSI/AAMI EC57 recommends 150 ms). Confirm against the paper before
-      claiming strict reproduction.
-  formula: "n_matched / min(n_peaks_A, n_peaks_B)"
-  formula_source: pending_verification
+      The article defines N as the R waves the two algorithms detect correctly
+      but never prints the tolerance window used to decide "correct". 150 ms
+      follows ANSI/AAMI EC57 and is retained as an unverified engine parameter;
+      absolute qSQI values therefore depend on a value the article does not
+      state. Confirm against the article's supplementary material before
+      claiming a strict reproduction.
+  acceptance:
+    # article Eq (2)
+    rule: "Zhao & Zhang (2018) Eq (2)"
+    optimal_above:     {value: 0.90, source: zhao_zhang_2018}   # qSQI > 90 %
+    suspicious_from:   {value: 0.60, source: zhao_zhang_2018}   # 60 % <= qSQI <= 90 %
+    suspicious_to:     {value: 0.90, source: zhao_zhang_2018}
+    unqualified_below: {value: 0.60, source: zhao_zhang_2018}   # qSQI < 60 %
+    note: >
+      The optimal rule is strict, so exactly 90 % is suspicious; the
+      unqualified rule is strict, so exactly 60 % is suspicious. That is what
+      Eq (2) prints.
   adaptive:
     enabled: false
     note: >
@@ -112,75 +149,266 @@ q_sqi:
       detector B. Off by default so the primary qSQI stays non-adaptive.
 
 p_sqi:
-  # Power in the QRS-related band divided by total in-band power.
+  # pSQI = integral(5..15 Hz) P(f) df / integral(5..40 Hz) P(f) df
+  #                                                      -- article Eq (3)
+  # The denominator band starts at 5 Hz, NOT at 0.5 Hz: the numerator is the
+  # QRS band (5-15 Hz, ~99 % of the ECG energy, centred near 10 Hz) and the
+  # denominator is the overall energy over the same low cut.
+  formula: "integral(5..15 Hz) P(f) df / integral(5..40 Hz) P(f) df"
+  formula_source: zhao_zhang_2018
   qrs_band_hz: [5.0, 15.0]
-  qrs_band_source: pending_verification
-  total_band_hz: [0.5, 40.0]
-  total_band_source: pending_verification
+  qrs_band_source: zhao_zhang_2018
+  total_band_hz: [5.0, 40.0]
+  total_band_source: zhao_zhang_2018
   psd_method: welch
   psd_nperseg: 500          # 2 s at 250 Hz
   psd_source: pending_verification
+  psd_note: >
+    The article says "spectrum analysis is performed" and prints neither the
+    estimator nor the window length, so these stay unverified.
+  acceptance:
+    # article Eq (4) and Eq (5)
+    #   optimal      l1 <= pSQI <= l2
+    #   suspicious   l3 <= pSQI <  l1
+    #   unqualified  pSQI > l2  or  pSQI < l3
+    # Note this index is band-pass-like: a value ABOVE l2 is unqualified, not
+    # optimal, because too much of the total power sitting in the QRS band is as
+    # abnormal as too little.
+    rule: "Zhao & Zhang (2018) Eq (4)-(5)"
+    heart_rate_bands:
+      - {min_bpm: {value: 60.0,  source: zhao_zhang_2018},
+         max_bpm: {value: 130.0, source: zhao_zhang_2018},
+         l1: {value: 0.5, source: zhao_zhang_2018},
+         l2: {value: 0.8, source: zhao_zhang_2018},
+         l3: {value: 0.4, source: zhao_zhang_2018}}
+      - {min_bpm: {value: 130.0, source: zhao_zhang_2018},
+         max_bpm: {value: 160.0, source: zhao_zhang_2018},
+         l1: {value: 0.4, source: zhao_zhang_2018},
+         l2: {value: 0.7, source: zhao_zhang_2018},
+         l3: {value: 0.3, source: zhao_zhang_2018}}
+    note: >
+      The article calibrated these limits on heart rates from 60 to 160 bpm
+      only. Outside that range no criterion is defined and the implementation
+      reports the index as "tidak dapat diterapkan" instead of reusing another
+      band's numbers.
 
 k_sqi:
-  # Kurtosis convention is stated explicitly so a library default can never
-  # silently define the science (IDEA.md section 25).
-  #   fisher  -> E[(x-mean)^4]/sigma^4 - 3  (Gaussian = 0)
-  #   pearson -> E[(x-mean)^4]/sigma^4      (Gaussian = 3)
+  # kSQI = mu4 = E{(x - mu_x)^4} / sigma^4              -- article Eq (9)
+  # The FOURTH STANDARDIZED MOMENT (Pearson convention): a Gaussian signal has
+  # the value 3. The excess-kurtosis (Fisher) convention subtracts 3 and would
+  # shift every threshold in Eq (10) by three, so the convention is part of the
+  # science and is stated here rather than defaulted by a library.
+  formula: "E{(x - mu)^4} / sigma^4"
+  formula_source: zhao_zhang_2018
   definition:
-    value: fisher
-    source: pending_verification
+    value: pearson
+    source: zhao_zhang_2018
+    note: >
+      pearson -> E[(x-mean)^4]/sigma^4, Gaussian = 3, which is the article's
+      nu4. fisher -> the same minus 3, Gaussian = 0, kept only for comparison
+      plots; the acceptance criterion in Eq (10) is stated for nu4 and is
+      refused for a fisher value.
   compute_on:
     value: preprocessed
     source: pending_verification
+    note: >
+      The article computes kurtosis on the signal it is assessing but does not
+      say whether that signal has been filtered first.
+  acceptance:
+    # article Eq (10) -- BINARY: the article defines no suspicious band here,
+    # and its Eq (29) membership assignment is binary in the same way.
+    rule: "Zhao & Zhang (2018) Eq (10)"
+    optimal_above:            {value: 5.0, source: zhao_zhang_2018}   # kSQI > 5
+    unqualified_at_or_below:  {value: 5.0, source: zhao_zhang_2018}   # kSQI <= 5
+    note: >
+      A noise-free normal-sinus ECG gives > 5; power-frequency interference,
+      baseline drift and Gaussian random noise push it below 5; EMG
+      interference puts it near 5.
 
 bas_sqi:
+  # basSQI = 1 - integral(0..1 Hz) P(f) df / integral(0..40 Hz) P(f) df
+  #                                                      -- article Eq (11)
+  # The leading "1 -" is part of the definition: a value close to 1 means little
+  # baseline drift. The bare ratio would invert the meaning of every band in
+  # Eq (12).
+  formula: "1 - integral(0..1 Hz) P(f) df / integral(0..40 Hz) P(f) df"
+  formula_source: zhao_zhang_2018
   baseline_band_hz: [0.0, 1.0]
-  baseline_band_source: pending_verification
+  baseline_band_source: zhao_zhang_2018
   total_band_hz: [0.0, 40.0]
-  total_band_source: pending_verification
+  total_band_source: zhao_zhang_2018
   psd_nperseg: 500
+  acceptance:
+    # article Eq (12)
+    rule: "Zhao & Zhang (2018) Eq (12)"
+    optimal_from:      {value: 0.95, source: zhao_zhang_2018}   # 0.95 <= basSQI <= 1
+    optimal_to:        {value: 1.00, source: zhao_zhang_2018}
+    suspicious_from:   {value: 0.90, source: zhao_zhang_2018}   # 0.90 <= basSQI < 0.95
+    suspicious_to:     {value: 0.95, source: zhao_zhang_2018}
+    unqualified_below: {value: 0.90, source: zhao_zhang_2018}   # basSQI < 0.90
+    note: >
+      The article's worked examples give 0.966 for a high-quality sample and
+      0.5 for a low-quality one.
+
+fusion:
+  # Simple heuristic fusion of the per-index acceptance levels,
+  # article Eq (13)-(16). For four indices the rule is Eq (15):
+  #   Excellent            #optimal >= 3 and #unqualified = 0
+  #   Unacceptable         #unqualified >= 3
+  #                        or (#unqualified = 2 and #suspicious >= 1)
+  #                        or (#unqualified = 1 and #suspicious = 3)
+  #   Barely acceptable    otherwise
+  # The rule is implemented in code rather than as thresholds here, because the
+  # article's coefficients were chosen ad hoc and are boolean conditions over
+  # counts, not tunable numbers. Only the factor list is configuration.
+  rule: "Zhao & Zhang (2018) Eq (15)"
+  rule_source: zhao_zhang_2018
+  factors: [qSQI, pSQI, kSQI, basSQI]
+  factors_source: zhao_zhang_2018
+  factors_note: >
+    The article compared every combination of 2-6 indices on PhysioNet/CinC 2017
+    and 2011 and selected U = {qSQI, pSQI, kSQI, basSQI}: adding the R-R
+    interval variability index lowered accuracy, sensitivity and specificity on
+    both databases.
 
 fuzzy:
   # Rating levels V = {Excellent, Barely Acceptable, Unacceptable}
   levels: ["Excellent", "Barely Acceptable", "Unacceptable"]
 
-  # Membership function families required by IDEA.md section 27.
-  # Cauchy for qSQI and basSQI, trapezoidal for pSQI, rectangular for kSQI.
+  # Membership function families, article Eq (22)-(32).
   #
-  # Parameters are given per rating level so every one of the three levels is
-  # explicit and nothing is derived at runtime. Family shapes:
-  #   cauchy:       mu(x) = 1 / (1 + ((x - xc) / gamma)^2)
-  #   trapezoidal:  mu(x) = ramp up [a,b], plateau 1 [b,c], ramp down [c,d]
-  #   rectangular:  mu(x) = 1 inside [a,b], 0 outside
+  # `scale` converts this pipeline's 0-1 index value to the scale the article's
+  # printed breakpoints live on: qSQI and basSQI are evaluated on 0-100, pSQI on
+  # 0-1, kSQI on its raw value. Keeping the scale explicit means the published
+  # numbers (80, 90, 0.25) stay exactly as printed.
+  #
+  # Families:
+  #   cauchy_increasing  0 below a; 1/(1+[k(x-a)]^2) up to cap_from; 1 above
+  #   cauchy_decreasing  1 at or below a; 1/(1+((x-a)/width)^2) above
+  #   cauchy_centred     1/(1+((x-centre)/width)^2)
+  #   ramp_up            0 below a; linear to 1 at b; 1 above b
+  #   ramp_down          1 below a; linear to 0 at b; 0 above b
+  #   trapezoid          0 below a; up to 1 over [a,b]; 1 over [b,c]; to 0 at d
+  #   step_above         1 strictly above threshold, else 0
+  #   step_at_or_below   1 at or below threshold, else 0
+  #   zero               identically 0
   membership:
     qSQI:
-      family: cauchy
-      Excellent:         {xc: {value: 0.90, source: pending_verification}, gamma: {value: 0.08, source: pending_verification}}
-      Barely Acceptable: {xc: {value: 0.65, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
-      Unacceptable:      {xc: {value: 0.35, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+      family: {value: cauchy_increasing, source: zhao_zhang_2018}
+      scale: {value: 100.0, source: zhao_zhang_2018}
+      Excellent:
+        # Eq (22): k = 0.3 as printed. Note the article's own continuity
+        # argument just above Eq (22) implies k = 1/30 for a smooth join at
+        # q = 90, so the printed curve jumps from 0.1 to 1.0 at q = 90. The
+        # printed value is used; the discontinuity is reported, not smoothed.
+        family: {value: cauchy_increasing, source: zhao_zhang_2018}
+        a: {value: 80.0, source: zhao_zhang_2018}
+        k: {value: 0.3, source: zhao_zhang_2018}
+        cap_from: {value: 90.0, source: zhao_zhang_2018}
+      Barely Acceptable:
+        # Eq (25)
+        family: {value: cauchy_centred, source: zhao_zhang_2018}
+        centre: {value: 75.0, source: zhao_zhang_2018}
+        width: {value: 7.5, source: zhao_zhang_2018}
+      Unacceptable:
+        # Eq (24): 1 at or below 55, then 1/(1+((q-55)/5)^2)
+        family: {value: cauchy_decreasing, source: zhao_zhang_2018}
+        a: {value: 55.0, source: zhao_zhang_2018}
+        width: {value: 5.0, source: zhao_zhang_2018}
     pSQI:
-      family: trapezoidal
-      Excellent:         {a: {value: 0.55, source: pending_verification}, b: {value: 0.80, source: pending_verification}, c: {value: 0.95, source: pending_verification}, d: {value: 1.00, source: pending_verification}}
-      Barely Acceptable: {a: {value: 0.25, source: pending_verification}, b: {value: 0.45, source: pending_verification}, c: {value: 0.60, source: pending_verification}, d: {value: 0.80, source: pending_verification}}
-      Unacceptable:      {a: {value: 0.00, source: pending_verification}, b: {value: 0.05, source: pending_verification}, c: {value: 0.25, source: pending_verification}, d: {value: 0.45, source: pending_verification}}
+      family: {value: ramp_up, source: zhao_zhang_2018}
+      scale: {value: 1.0, source: zhao_zhang_2018}
+      Excellent:
+        # Eq (26): 0 below 0.25, 10(x-0.25) up to 0.35, 1 above
+        family: {value: ramp_up, source: zhao_zhang_2018}
+        a: {value: 0.25, source: zhao_zhang_2018}
+        b: {value: 0.35, source: zhao_zhang_2018}
+      Barely Acceptable:
+        # Eq (28): trapezoid 0.18-0.22-0.28-0.32
+        family: {value: trapezoid, source: zhao_zhang_2018}
+        a: {value: 0.18, source: zhao_zhang_2018}
+        b: {value: 0.22, source: zhao_zhang_2018}
+        c: {value: 0.28, source: zhao_zhang_2018}
+        d: {value: 0.32, source: zhao_zhang_2018}
+      Unacceptable:
+        # Eq (27): 1 below 0.15, 10(0.25-x) down to 0 at 0.25
+        family: {value: ramp_down, source: zhao_zhang_2018}
+        a: {value: 0.15, source: zhao_zhang_2018}
+        b: {value: 0.25, source: zhao_zhang_2018}
+      note: >
+        The article's acceptance criterion for this index (Eq 4-5, optimal
+        [0.5, 0.8]) and these membership functions disagree: the Excellent
+        membership already saturates from 0.35. Both are implemented as printed,
+        each in its own place -- criterion for the per-index verdict, membership
+        for the fuzzy stage -- and neither is silently reconciled.
     kSQI:
-      family: rectangular
-      Excellent:         {a: {value: 3.0, source: pending_verification}, b: {value: 20.0, source: pending_verification}}
-      Barely Acceptable: {a: {value: 2.0, source: pending_verification}, b: {value: 3.0, source: pending_verification}}
-      Unacceptable:      {a: {value: 0.0, source: pending_verification}, b: {value: 2.0, source: pending_verification}}
+      family: {value: step_above, source: zhao_zhang_2018}
+      scale: {value: 1.0, source: zhao_zhang_2018}
+      Excellent:
+        # Eq (29): value > 5 -> (1, 0, 0)
+        family: {value: step_above, source: zhao_zhang_2018}
+        threshold: {value: 5.0, source: zhao_zhang_2018}
+      Barely Acceptable:
+        # Eq (29) assigns no Barely-Acceptable membership to kurtosis: the row
+        # is either (1, 0, 0) or (0, 0, 1). Written as an explicit zero family so
+        # the shape of R stays faithful.
+        family: {value: zero, source: zhao_zhang_2018}
+      Unacceptable:
+        # Eq (29): value <= 5 -> (0, 0, 1)
+        family: {value: step_at_or_below, source: zhao_zhang_2018}
+        threshold: {value: 5.0, source: zhao_zhang_2018}
     basSQI:
-      family: cauchy
-      Excellent:         {xc: {value: 0.90, source: pending_verification}, gamma: {value: 0.08, source: pending_verification}}
-      Barely Acceptable: {xc: {value: 0.65, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
-      Unacceptable:      {xc: {value: 0.35, source: pending_verification}, gamma: {value: 0.15, source: pending_verification}}
+      family: {value: cauchy_increasing, source: zhao_zhang_2018}
+      scale: {value: 100.0, source: zhao_zhang_2018}
+      Excellent:
+        # Eq (30): 0 below 90, 1/(1+[0.8718(b-90)]^2) up to 95, 1 from 95
+        family: {value: cauchy_increasing, source: zhao_zhang_2018}
+        a: {value: 90.0, source: zhao_zhang_2018}
+        k: {value: 0.8718, source: zhao_zhang_2018}
+        cap_from: {value: 95.0, source: zhao_zhang_2018}
+      Barely Acceptable:
+        # Eq (32)
+        family: {value: cauchy_centred, source: zhao_zhang_2018}
+        centre: {value: 92.0, source: zhao_zhang_2018}
+        width: {value: 2.5, source: zhao_zhang_2018}
+      Unacceptable:
+        # Eq (31): 1 at or below 85, then 1/(1+((b-85)/5)^2)
+        family: {value: cauchy_decreasing, source: zhao_zhang_2018}
+        a: {value: 85.0, source: zhao_zhang_2018}
+        width: {value: 5.0, source: zhao_zhang_2018}
 
-  # Weight vector W. sum(W) == 1 is asserted by tests/test_sqi.py.
+  # Weight vector W = (0.4, 0.4, 0.1, 0.1). sum(W) == 1 is asserted by
+  # tests/test_sqi.py and re-checked at run time.
+  # Article: "When the ratios of the four were set as follows (0.4, 0.4, 0.1,
+  # 0.1), whether the database D1 or D2, the accuracy ... was relatively high,
+  # with minimal fluctuation."
   weights:
-    qSQI:   {value: 0.25, source: pending_verification}
-    pSQI:   {value: 0.25, source: pending_verification}
-    kSQI:   {value: 0.25, source: pending_verification}
-    basSQI: {value: 0.25, source: pending_verification}
+    qSQI:   {value: 0.4, source: zhao_zhang_2018}
+    pSQI:   {value: 0.4, source: zhao_zhang_2018}
+    kSQI:   {value: 0.1, source: zhao_zhang_2018}
+    basSQI: {value: 0.1, source: zhao_zhang_2018}
 
-  synthesis: bounded_max_product    # bounded (max-product) fuzzy synthesis
-  synthesis_source: pending_verification
-  decision: max_membership          # argmax over the membership vector
+  # Rating values j used by Eq (33): v1 = 1 (E), v2 = 2 (B), v3 = 3 (U).
+  rating_values:
+    Excellent:         {value: 1.0, source: zhao_zhang_2018}
+    Barely Acceptable: {value: 2.0, source: zhao_zhang_2018}
+    Unacceptable:      {value: 3.0, source: zhao_zhang_2018}
+
+  # S = W o R with the bounded operator M(., +), i.e.
+  #   s_j = min(1, sum_i (w_i * r_ij))
+  # Article: "we use the operator M(., +), which is also known as a bounded
+  # operator."
+  synthesis: bounded_sum
+  synthesis_source: zhao_zhang_2018
+
+  # Decision by the principle of weighted membership degree, Eq (33):
+  #   v = sum_j (s_j^2 * j) / sum_j (s_j^2)
+  # then Eq (34):
+  #   v <= 1.50 -> Excellent; 1.50 < v < 2.40 -> Barely Acceptable;
+  #   v >= 2.40 -> Unacceptable
+  decision:
+    kind: weighted_average
+    kind_source: zhao_zhang_2018
+    excellent_max:    {value: 1.50, source: zhao_zhang_2018}
+    unacceptable_min: {value: 2.40, source: zhao_zhang_2018}
+    rule: "Zhao & Zhang (2018) Eq (33)-(34)"

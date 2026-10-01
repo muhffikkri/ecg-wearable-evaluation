@@ -5,9 +5,13 @@ from .export import export_results, write_markdown
 from .frame_analysis import Segment10s, segment_frame, segment_frames
 from .pipeline import FrameAnalyzer, ResultCache, run_analysis
 from .statistics import (
+    ACCEPTANCE_COLUMNS,
     ACCEPTED_CLASSES,
+    FUSION_COLUMN,
     SQI_COLUMNS,
     acceptable_share,
+    acceptance_recap,
+    activity_recap,
     aggregate_by,
     box_outliers,
     class_distribution,
@@ -21,12 +25,16 @@ from .statistics import (
 )
 
 __all__ = [
+    "ACCEPTANCE_COLUMNS",
     "ACCEPTED_CLASSES",
+    "FUSION_COLUMN",
     "FrameAnalyzer",
     "ResultCache",
     "SQI_COLUMNS",
     "Segment10s",
     "acceptable_share",
+    "acceptance_recap",
+    "activity_recap",
     "aggregate_by",
     "box_outliers",
     "class_distribution",
