@@ -55,6 +55,17 @@ FUSION_LABELS_ID: dict[str, str] = {
     "undefined": "Tidak dapat ditentukan",
 }
 
+#: Warna tiap tingkat penerimaan. Hijau/kuning/merah mengikuti kelas kualitas,
+#: dan abu-abu dipakai untuk kriteria yang tidak dapat diterapkan supaya warna
+#: sebuah kategori tidak pernah terbaca sebagai penilaian buruk padahal
+#: kriterianya memang tidak berlaku.
+ACCEPTANCE_COLORS: dict[str, str] = {
+    "optimal": "#2e7d32",
+    "suspicious": "#f9a825",
+    "unqualified": "#c62828",
+    "undefined": "#94a3b8",
+}
+
 #: Warna titik penyimpang. Biru tidak dipakai oleh kelas kualitas
 #: (hijau/kuning/merah) maupun warna posisi, sehingga titik biru selalu terbaca
 #: sebagai "ini peserta yang berbeda", bukan sebagai kategori tertentu.
@@ -256,6 +267,181 @@ def acceptance_recap_table(recap: pd.DataFrame) -> pd.DataFrame:
                 )
 
     return pd.DataFrame(columns)
+
+
+def acceptance_decision_table(summary: pd.DataFrame) -> pd.DataFrame:
+    """Tabel keputusan penerimaan: kolom tiap indeks, baris tiap aktivitas.
+
+    Satu sel berisi satu kategori penerimaan artikel (Optimal / Suspicious /
+    Unqualified / Tidak dapat diterapkan), yaitu kategori yang paling banyak
+    muncul pada frame aktivitas tersebut. Kekuatan keputusannya ada di
+    :func:`acceptance_coverage_table`, dan kategorinya dihitung per frame di
+    :func:`~ecg_eval.analysis.statistics.acceptance_summary`.
+    """
+    if summary is None or summary.empty:
+        return pd.DataFrame()
+
+    columns: dict[str, Any] = {"Aktivitas": []}
+    for key in SQI_KEYS:
+        if f"{key}_level" in summary:
+            columns[sqi_label_id(key)] = []
+
+    for _, row in summary.iterrows():
+        columns["Aktivitas"].append(position_label(row["position"]))
+        for key in SQI_KEYS:
+            if f"{key}_level" not in summary:
+                continue
+            level = str(row.get(f"{key}_level", "") or "")
+            name = ACCEPTANCE_LABELS_ID.get(level, level) or "-"
+            if bool(row.get(f"{key}_tied", False)):
+                name = f"{name} (seri)"
+            columns[sqi_label_id(key)].append(name)
+
+    return pd.DataFrame(columns)
+
+
+def acceptance_coverage_table(summary: pd.DataFrame) -> pd.DataFrame:
+    """Seberapa kuat keputusan pada :func:`acceptance_decision_table`.
+
+    Satu sel berisi persentase frame yang benar-benar berada pada kategori yang
+    dilaporkan, supaya kategori yang bulat dan kategori yang hanya unggul tipis
+    tidak terbaca sama.
+    """
+    if summary is None or summary.empty:
+        return pd.DataFrame()
+
+    columns: dict[str, Any] = {"Aktivitas": []}
+    for key in SQI_KEYS:
+        if f"{key}_pct" in summary:
+            columns[sqi_label_id(key)] = []
+
+    for _, row in summary.iterrows():
+        columns["Aktivitas"].append(position_label(row["position"]))
+        for key in SQI_KEYS:
+            if f"{key}_pct" not in summary:
+                continue
+            columns[sqi_label_id(key)].append(_pct(row.get(f"{key}_pct")))
+
+    return pd.DataFrame(columns)
+
+
+def acceptance_decision_legend() -> str:
+    """Legenda tabel keputusan penerimaan per aktivitas."""
+    indices = " · ".join(sqi_label_id(key) for key in SQI_KEYS)
+    levels = " · ".join(ACCEPTANCE_LABELS_ID[level] for level in ACCEPTANCE_COLUMNS)
+    return (
+        "**Legenda.** Baris adalah aktivitas rekaman dan kolom adalah indeks "
+        f"kualitas sinyal ({indices}). Setiap sel berisi kategori penerimaan "
+        "artikel Zhao & Zhang (2018) yang paling banyak muncul pada frame "
+        f"aktivitas tersebut: {levels}. Kategori ditentukan per frame 10 detik "
+        "lalu diambil yang terbanyak, bukan dengan menerapkan kriteria pada nilai "
+        "rata-rata aktivitas. Bila dua kategori sama banyak, yang dilaporkan "
+        "adalah yang lebih hati-hati dan selnya ditandai `(seri)`. Kolom `Tidak "
+        "dapat diterapkan` berarti kriterianya tidak berlaku, bukan penilaian "
+        "buruk. Kekuatan tiap keputusan ada di tabel setelahnya. " + _SCOPE_NOTE
+    )
+
+
+def acceptance_figure(
+    df: pd.DataFrame, *, columns: Sequence[str] = SQI_KEYS, height: int | None = None
+):
+    """Batang bertumpuk kategori penerimaan, satu panel per indeks.
+
+    Sumbu-y adalah aktivitas dan sumbu-x adalah porsi frame pada tiap kategori
+    penerimaan, sehingga setiap batang berjumlah 100% dan satu panel menjawab
+    "seberapa sering indeks ini diterima pada tiap aktivitas". Panelnya dipisah
+    karena kriterianya berbeda per indeks, jadi tingginya tidak boleh
+    dibandingkan antar panel.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    from .plots import INK, INK_SOFT, _style
+
+    title = "Kategori penerimaan tiap indeks kualitas sinyal per aktivitas"
+    if df is None or df.empty:
+        return _style(go.Figure(), title=title, height=520, showlegend=False)
+
+    frame = df[df["valid"]] if "valid" in df else df
+    present = [
+        key
+        for key in columns
+        if f"{key}_acceptance" in frame.columns and frame[f"{key}_acceptance"].notna().any()
+    ]
+    if frame.empty or not present:
+        return _style(go.Figure(), title=title, height=520, showlegend=False)
+
+    order = [p for p in POSITION_ORDER if p in set(frame["position"])]
+    labels = [position_label(p) for p in order]
+    n_panels = len(present)
+    n_cols = 2 if n_panels > 1 else 1
+    n_rows = math.ceil(n_panels / n_cols)
+    if height is None:
+        height = 120 + n_rows * 260 + 130
+
+    figure = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
+        subplot_titles=[sqi_label_id(key) for key in present],
+        horizontal_spacing=0.16,
+        vertical_spacing=0.18,
+    )
+
+    for index, key in enumerate(present):
+        row, col = divmod(index, n_cols)
+        row += 1
+        col += 1
+        source = f"{key}_acceptance"
+        for level in ACCEPTANCE_COLUMNS:
+            shares: list[float] = []
+            for position in order:
+                subset = frame[frame["position"] == position][source]
+                total = int(subset.notna().sum())
+                count = int((subset == level).sum())
+                shares.append(100.0 * count / total if total else 0.0)
+            figure.add_trace(
+                go.Bar(
+                    x=shares,
+                    y=labels,
+                    orientation="h",
+                    name=ACCEPTANCE_LABELS_ID[level],
+                    marker_color=ACCEPTANCE_COLORS[level],
+                    legendgroup=level,
+                    showlegend=(index == 0),
+                    text=[f"{value:.0f}%" if value >= 5 else "" for value in shares],
+                    textposition="inside",
+                    hovertemplate=(
+                        f"{ACCEPTANCE_LABELS_ID[level]}<br>%{{y}}<br>"
+                        "%{x:.1f}%<extra></extra>"
+                    ),
+                ),
+                row=row,
+                col=col,
+            )
+
+        figure.update_xaxes(title_text="Porsi frame (%)", range=[0, 100], row=row, col=col)
+        figure.update_yaxes(
+            title_text="Aktivitas" if col == 1 else None,
+            # The first category lands at the bottom, so the order is reversed to
+            # keep Berbaring at the top as in the other activity figures.
+            categoryorder="array",
+            categoryarray=list(reversed(labels)),
+            tickfont=dict(size=12, color=INK),
+            title_font=dict(size=12, color=INK),
+            row=row,
+            col=col,
+        )
+
+    _style(figure, title=title, height=height, showlegend=True)
+    figure.update_layout(
+        barmode="stack",
+        hoverlabel=dict(font=dict(size=11, color=INK_SOFT)),
+        margin=dict(l=150, r=32, t=110, b=110),
+    )
+    for annotation in figure.layout.annotations:
+        # Panel titles are the only annotations this figure owns.
+        annotation.font = dict(size=13, color=INK)
+    return figure
 
 
 def acceptance_recap_legend() -> str:
@@ -1204,8 +1390,13 @@ __all__ = [
     "POSITION_LABELS_ID",
     "POSITION_ORDER",
     "RECAP_STATS",
+    "ACCEPTANCE_COLORS",
     "ACCEPTANCE_LABELS_ID",
     "FUSION_LABELS_ID",
+    "acceptance_coverage_table",
+    "acceptance_decision_legend",
+    "acceptance_decision_table",
+    "acceptance_figure",
     "acceptance_recap_legend",
     "acceptance_recap_table",
     "acceptance_table",

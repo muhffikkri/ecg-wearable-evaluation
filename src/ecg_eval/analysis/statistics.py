@@ -13,12 +13,25 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from ..models.result import (
+    ACCEPTANCE_LEVELS,
+    OPTIMAL,
+    SUSPICIOUS,
+    UNDEFINED,
+    UNQUALIFIED,
+)
+
 SQI_COLUMNS = ("qSQI", "pSQI", "kSQI", "basSQI")
 CLASS_COLUMNS = ("fuzzy_excellent", "fuzzy_barely_acceptable", "fuzzy_unacceptable")
 
 #: Acceptance levels reported per index (Zhao & Zhang 2018), plus the level used
 #: when a criterion does not apply to a frame at all.
-ACCEPTANCE_COLUMNS = ("optimal", "suspicious", "unqualified", "undefined")
+ACCEPTANCE_COLUMNS = (*ACCEPTANCE_LEVELS, UNDEFINED)
+
+#: Preference order used only to break a tie between equally common acceptance
+#: levels: the most cautious *defined* verdict wins, and a criterion that did not
+#: apply never displaces a real verdict, so ``undefined`` comes last.
+ACCEPTANCE_TIE_BREAK = (UNQUALIFIED, SUSPICIOUS, OPTIMAL, UNDEFINED)
 
 #: Column on a frame row holding the fused simple-heuristic-fusion class.
 FUSION_COLUMN = "fusion_class"
@@ -233,6 +246,62 @@ def acceptance_recap(
     return _in_position_order(pd.DataFrame(rows), [])
 
 
+def acceptance_summary(
+    df: pd.DataFrame,
+    columns: Sequence[str] = SQI_COLUMNS,
+) -> pd.DataFrame:
+    """Per activity, the decisive acceptance category of every index.
+
+    One row per activity and one cell per index: the acceptance level that most
+    frames of that activity landed in, with the frame count and share behind it.
+
+    The criterion is defined per 10-second frame, so an activity verdict is a
+    majority *over frames* -- never the criterion applied to the activity's mean
+    index value. Applying a threshold to a mean would report a frame that was
+    never recorded, and for the heart-rate-dependent index it would additionally
+    need a heart rate for an average that has none.
+
+    A tie between equally common categories resolves to the more cautious defined
+    one (see ``ACCEPTANCE_TIE_BREAK``) and is flagged in ``<index>_tied``, so the
+    tie is visible instead of being hidden by the ordering.
+    """
+    if df.empty:
+        return pd.DataFrame()
+    frame = df[df["valid"]] if "valid" in df else df
+    if frame.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for position, group in frame.groupby("position", dropna=False):
+        total = len(group)
+        row: dict[str, Any] = {"position": position, "n_frames": int(total)}
+        for column in columns:
+            key = f"{column}_acceptance"
+            if key not in group:
+                continue
+            values = group[key].fillna("").tolist()
+            counts = {
+                level: sum(1 for value in values if value == level)
+                for level in ACCEPTANCE_COLUMNS
+            }
+            best = max(counts.values())
+            if best <= 0:
+                row[f"{column}_level"] = ""
+                row[f"{column}_n"] = 0
+                row[f"{column}_pct"] = math.nan
+                row[f"{column}_tied"] = False
+                continue
+            winners = {level for level in ACCEPTANCE_COLUMNS if counts[level] == best}
+            level = next(item for item in ACCEPTANCE_TIE_BREAK if item in winners)
+            row[f"{column}_level"] = level
+            row[f"{column}_n"] = int(counts[level])
+            row[f"{column}_pct"] = 100.0 * counts[level] / total if total else math.nan
+            row[f"{column}_tied"] = len(winners) > 1
+        rows.append(row)
+
+    return _in_position_order(pd.DataFrame(rows), [])
+
+
 def aggregate_by(df: pd.DataFrame, keys: list[str], *, valid_only: bool = True) -> pd.DataFrame:
     """Group and compute descriptive stats for every SQI plus class shares."""
     if df.empty:
@@ -367,6 +436,7 @@ def activity_recap(
 
 __all__ = [
     "ACCEPTANCE_COLUMNS",
+    "ACCEPTANCE_TIE_BREAK",
     "ACCEPTED_CLASSES",
     "CLASS_COLUMNS",
     "CLASS_LEVELS",
@@ -374,6 +444,7 @@ __all__ = [
     "SQI_COLUMNS",
     "acceptable_share",
     "acceptance_recap",
+    "acceptance_summary",
     "activity_recap",
     "aggregate_by",
     "box_outliers",

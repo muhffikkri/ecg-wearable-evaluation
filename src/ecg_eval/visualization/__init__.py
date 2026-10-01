@@ -1,6 +1,7 @@
 """Public surface of the visualization package."""
 
 from .labels_id import (
+    ACCEPTANCE_COLORS,
     ACCEPTANCE_LABELS_ID,
     CLASS_LABELS_ID,
     FUSION_LABELS_ID,
@@ -8,6 +9,10 @@ from .labels_id import (
     POSITION_LABELS_ID,
     POSITION_SUMMARY_LABELS,
     RECAP_STATS,
+    acceptance_coverage_table,
+    acceptance_decision_legend,
+    acceptance_decision_table,
+    acceptance_figure,
     acceptance_recap_legend,
     acceptance_recap_table,
     acceptance_table,
@@ -62,6 +67,7 @@ from .plots import (
 )
 
 __all__ = [
+    "ACCEPTANCE_COLORS",
     "ACCEPTANCE_LABELS_ID",
     "CLASS_COLORS",
     "CLASS_LABELS_ID",
@@ -73,6 +79,10 @@ __all__ = [
     "RECAP_STATS",
     "SQI_LABELS",
     "SQI_ORDER",
+    "acceptance_coverage_table",
+    "acceptance_decision_legend",
+    "acceptance_decision_table",
+    "acceptance_figure",
     "acceptance_recap_legend",
     "acceptance_recap_table",
     "acceptance_table",

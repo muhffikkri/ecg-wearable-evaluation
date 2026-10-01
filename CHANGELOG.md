@@ -50,7 +50,16 @@ the per-index acceptance criteria.
   class.
 - `docs/SQI_ZHAO_ZHANG.md`: the methodology, formulas and acceptance criteria
   written out from the article.
-- `scripts/sqi_recap_report.py`: regenerates the per-activity recap tables.
+- `scripts/sqi_recap_report.py`: regenerates the per-activity recap tables,
+  the acceptance decision table and the recap figures.
+- `acceptance_summary`: the decisive acceptance category of every index per
+  activity -- the category most frames of that activity landed in -- with the
+  frame count and share behind it.
+- `acceptance_decision_table` / `acceptance_coverage_table`: that verdict as a
+  table with one column per index and one row per activity, plus how strong each
+  verdict is.
+- `acceptance_figure`: stacked bars of the acceptance categories per index and
+  activity, and the recap figures written as self-contained interactive HTML.
 
 ### Notes
 
