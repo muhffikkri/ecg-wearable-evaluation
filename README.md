@@ -13,6 +13,21 @@ are blocked and rewritten into scope statements.
 > which supersedes [`IDEA.md`](IDEA.md) where the two differ. Sections 7, 8 and
 > 11 of `IDEA.md` described a two-way conversion subsystem that has been deleted.
 
+## Overview
+This repo evaluates ECG signal quality from the ECGRHYTHMIA wearable prototype using SQI methodology (Zhao & Zhang 2018). It provides tools for ingestion, annotation, analysis, interpretation, and reconstruction of datasets.
+
+## Folder Structure
+- `app.py`: Streamlit entry point
+- `scripts/`: CLI for dataset generation (`build_jsonl_dataset.py`)
+- `configs/`: YAML configuration files
+- `templates/`: JSONL schema
+- `src/ecg_eval/`: Core library (ingestion, reconstruction, models, preprocessing, detectors, SQI, analysis, interpretation, JSONL handling)
+- `data/`: Read-only recordings
+- `references/`: Source papers
+- `docs/`: Additional documentation
+- `results/`: Outputs (CSV, JSON, plots, reports)
+- `processed/`: Generated datasets (if any)
+
 ## Run it
 
 ```bash
@@ -107,6 +122,15 @@ Two further limitations are stated in the code where they apply:
   carry DC offsets of roughly -2.7 to +11.8 mV. Baseline removal is an explicit
   adaptation, not part of the reference method.
 
+## Results
+
+- All 216 analyzable frames classified as **Barely Acceptable** (0% Excellent, 0% Unacceptable) per fuzzy evaluation.
+- Mean SQIs: qSQI 0.260, pSQI 0.666, kSQI 22.9, basSQI 0.964.
+- Friedman test shows significant difference across positions only for pSQI (p=0.0001, Kendall’s W=0.778); qSQI, kSQI, basSQI not significant.
+- No frame fell below 0.5 threshold for kSQI or basSQI; 98.6% of frames had qSQI<0.5 indicating R-peak detector disagreement.
+
+These results describe the recorded sample and do not establish clinical superiority of any position.
+
 ## Layout
 
 ```text
@@ -139,3 +163,8 @@ python -m pytest tests/ -q
 Zhao, Z., & Zhang, Y. (2018). SQI Quality Evaluation Mechanism of Single-Lead
 ECG Signal Based on Simple Heuristic Fusion and Fuzzy Comprehensive Evaluation.
 *Frontiers in Physiology*, 9, 727. <https://doi.org/10.3389/fphys.2018.00727>
+
+Juya Zhang, Yu Guo, Xinming Dong, Tong Wang, Jinhai Wang, Xin Ma, Huiquan Wang,
+(2025). Opportunities and challenges of noise interference suppression algorithms
+for dynamic ECG signals in wearable devices: A review. *Measurement*, 250,
+117067. <https://doi.org/10.1016/j.measurement.2025.117067>

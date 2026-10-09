@@ -1,0 +1,76 @@
+PMID- 39176784
+OWN - NLM
+STAT- MEDLINE
+DCOM- 20240823
+LR  - 20260130
+IS  - 1879-8365 (Electronic)
+IS  - 0926-9630 (Linking)
+VI  - 316
+DP  - 2024 Aug 22
+TI  - Quality of Electrocardiography Recorded with Consumer Smart Shirts.
+PG  - 487-491
+LID - 10.3233/SHTI240455 [doi]
+AB  - Smart wearables support continuous monitoring of vital signs for early detection 
+      of deteriorating health. However, the devices and sensors require sufficient 
+      quality to produce meaningful signals, in particular, if data is acquired in 
+      motion. In this study, we equipped 48 subjects with smart shirts recording 
+      one-lead electrocardiography (ECG), thoracic and abdominal respiratory inductance 
+      plethysmography, and three-axis acceleration. For 10 min each, the subjects sit, 
+      stand, walk, and run, with a resting period of 5 min in between each activity. We 
+      preprocessed the electrocardiogram and applied a signal quality index. We 
+      analyzed the signal quality index grouped by the activity and participants. For 
+      sitting, standing, walking, and running, the ECG signals provide acceptable 
+      quality over 73.20 %, 91.85 %, 12.26 %, and 13.14 % of the recording time. In 
+      conclusion, smart wearables may be useful for continuous health monitoring of 
+      people with a sedentary lifestyle, but rather not for sportive activities.
+FAU - Haas, Paulo
+AU  - Haas P
+AD  - Peter L. Reichertz Institute for Medical Informatics of TU Braunschweig and 
+      Hannover Medical School, Brunswick, Germany.
+FAU - Spicher, Nicolai
+AU  - Spicher N
+AD  - Department of Medical Informatics, University Medical Center Göttingen, 
+      Georg-August-Universität, Göttingen, Germany.
+FAU - Warnecke, Joana M
+AU  - Warnecke JM
+AD  - Peter L. Reichertz Institute for Medical Informatics of TU Braunschweig and 
+      Hannover Medical School, Brunswick, Germany.
+FAU - Deserno, Thomas M
+AU  - Deserno TM
+AD  - Peter L. Reichertz Institute for Medical Informatics of TU Braunschweig and 
+      Hannover Medical School, Brunswick, Germany.
+LA  - eng
+PT  - Journal Article
+PT  - Research Support, Non-U.S. Gov't
+PL  - Netherlands
+TA  - Stud Health Technol Inform
+JT  - Studies in health technology and informatics
+JID - 9214582
+SB  - IM
+MH  - Humans
+MH  - *Wearable Electronic Devices
+MH  - Clothing
+MH  - Male
+MH  - Electrocardiography
+MH  - Adult
+MH  - Female
+MH  - Electrocardiography, Ambulatory/instrumentation
+MH  - Signal Processing, Computer-Assisted
+OTO - NOTNLM
+OT  - Fitness trackers
+OT  - health trackers
+OT  - mHealth
+OT  - mobile health
+OT  - signal quality
+OT  - smart textiles
+OT  - smart wearables
+EDAT- 2024/08/23 06:42
+MHDA- 2024/08/23 06:43
+CRDT- 2024/08/23 05:04
+PHST- 2024/08/23 06:43 [medline]
+PHST- 2024/08/23 06:42 [pubmed]
+PHST- 2024/08/23 05:04 [entrez]
+AID - SHTI240455 [pii]
+AID - 10.3233/SHTI240455 [doi]
+PST - ppublish
+SO  - Stud Health Technol Inform. 2024 Aug 22;316:487-491. doi: 10.3233/SHTI240455.

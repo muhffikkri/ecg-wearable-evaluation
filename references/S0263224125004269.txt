@@ -1,0 +1,11 @@
+Juya Zhang, Yu Guo, Xinming Dong, Tong Wang, Jinhai Wang, Xin Ma, Huiquan Wang,
+Opportunities and challenges of noise interference suppression algorithms for dynamic ECG signals in wearable devices: A review,
+Measurement,
+Volume 250,
+2025,
+117067,
+ISSN 0263-2241,
+https://doi.org/10.1016/j.measurement.2025.117067.
+(https://www.sciencedirect.com/science/article/pii/S0263224125004269)
+Abstract: The primary obstacle in using wearable devices to record dynamic Electrocardiogram (ECG) signal for more efficient analysis of cardiac problems is noise interference, which can cause signal distortion and impact the accuracy of diagnosis and analysis. This paper examines noise suppression methods and their recent advancements in the time domain, frequency domain, time–frequency domain, and artificial intelligence domain, it assesses the various types of noise suppression, the advantages and disadvantages of the algorithms, real-time capabilities, noise reduction effectiveness, and performance metrics. This study also innovatively investigates the general applicability and specificity of the algorithms, discusses the shortcomings of the current ECG datasets, how to learn by analogy for noise reduction algorithms, the interpretability of the models as well as pointing out the problems and constraints of the existing algorithms for wearable devices as well as providing a unique perspective for future research directions.
+Keywords: Wearable devices; ECG signal; Noise suppression; Performance metrics
