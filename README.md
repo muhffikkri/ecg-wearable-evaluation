@@ -14,9 +14,11 @@ are blocked and rewritten into scope statements.
 > 11 of `IDEA.md` described a two-way conversion subsystem that has been deleted.
 
 ## Overview
+
 This repo evaluates ECG signal quality from the ECGRHYTHMIA wearable prototype using SQI methodology (Zhao & Zhang 2018). It provides tools for ingestion, annotation, analysis, interpretation, and reconstruction of datasets.
 
 ## Folder Structure
+
 - `app.py`: Streamlit entry point
 - `scripts/`: CLI for dataset generation (`build_jsonl_dataset.py`)
 - `configs/`: YAML configuration files
@@ -37,12 +39,12 @@ streamlit run app.py
 
 ## Tabs
 
-| Tab | Purpose |
-| --- | --- |
-| Dataset | Ingest and inspect frames from the raw tree or JSONL |
-| Annotation | Label body position per frame |
-| Analysis | Segmentation, the four SQIs, the fuzzy rating, comparisons |
-| Interpretation | Prose findings, constrained to signal quality |
+| Tab            | Purpose                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| Dataset        | Ingest and inspect frames from the raw tree or JSONL                                     |
+| Annotation     | Label body position per frame                                                            |
+| Analysis       | Segmentation, the four SQIs, the fuzzy rating, comparisons                               |
+| Interpretation | Prose findings, constrained to signal quality                                            |
 | Reconstruction | Assemble canonical frames from a Raspberry Pi recording and generate the website dataset |
 
 ## How a raw recording becomes a dataset
@@ -111,7 +113,7 @@ datasets instead of the recordings.
 This is **not** a verified reproduction, and the application says so on every
 run. All 37 scientific parameters in `configs/zhao_zhang.yaml` are marked
 `pending_verification`, so `is_strict_reproduction` is false and results are
-reported as a *structured* reproduction. Confirming those constants against the
+reported as a _structured_ reproduction. Confirming those constants against the
 published paper is the remaining work before the label can change.
 
 Two further limitations are stated in the code where they apply:
@@ -152,6 +154,11 @@ src/ecg_eval/
 data/                  recordings; read-only, never modified
 ```
 
+## Screenshots
+
+![Analysis Tab](screenshots/Screenshot%202026-10-09%20141130.png)
+![Annotation Tab](screenshots/Screenshot%202026-10-09%20141324.png)
+
 ## Tests
 
 ```bash
@@ -162,9 +169,8 @@ python -m pytest tests/ -q
 
 Zhao, Z., & Zhang, Y. (2018). SQI Quality Evaluation Mechanism of Single-Lead
 ECG Signal Based on Simple Heuristic Fusion and Fuzzy Comprehensive Evaluation.
-*Frontiers in Physiology*, 9, 727. <https://doi.org/10.3389/fphys.2018.00727>
+_Frontiers in Physiology_, 9, 727. <https://doi.org/10.3389/fphys.2018.00727>
 
 Juya Zhang, Yu Guo, Xinming Dong, Tong Wang, Jinhai Wang, Xin Ma, Huiquan Wang,
 (2025). Opportunities and challenges of noise interference suppression algorithms
-for dynamic ECG signals in wearable devices: A review. *Measurement*, 250,
-117067. <https://doi.org/10.1016/j.measurement.2025.117067>
+for dynamic ECG signals in wearable devices: A review. _Measurement_, 250, 117067. <https://doi.org/10.1016/j.measurement.2025.117067>

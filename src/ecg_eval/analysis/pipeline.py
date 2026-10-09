@@ -109,6 +109,7 @@ class ResultCache:
 
     def flush(self) -> None:
         if self.enabled and self.path is not None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self._memory, indent=1, default=str), encoding="utf-8")
 
     def clear(self) -> None:
