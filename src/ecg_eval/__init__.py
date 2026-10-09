@@ -12,7 +12,7 @@ This project evaluates ECG SIGNAL QUALITY. It is not a diagnostic tool and
 must not be used to infer arrhythmia or any clinical condition.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 REFERENCE = (
     "Zhao, Z., & Zhang, Y. (2018). SQI Quality Evaluation Mechanism of "
